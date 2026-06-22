@@ -1,0 +1,17 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  inbox-v2:
+    name: inbox-v2 contract test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.8"
+      - run: bun run tests/inbox-v2/run.ts
