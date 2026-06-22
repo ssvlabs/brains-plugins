@@ -1,0 +1,33 @@
+{
+  "name": "brains",
+  "description": "Your memory layer: Gmail, Calendar, Drive, and prior Claude conversations as queryable pages, with reflexive recall, turn-by-turn capture, a server-driven inbox, and boards/automations/workflows on top.",
+  "version": "2.1.0",
+  "author": {
+    "name": "brains (ssvlabs)"
+  },
+  "homepage": "https://mybrains.ai",
+  "userConfig": {
+    "token": {
+      "type": "string",
+      "title": "brains API token",
+      "description": "Bearer token for your brain. Used for the MCP server and the ingest/inbox hooks. Find it in your brains account settings.",
+      "sensitive": true,
+      "required": true
+    },
+    "endpoint": {
+      "type": "string",
+      "title": "brains endpoint",
+      "description": "Base URL of your brains server (no trailing slash). The plugin derives /mcp, /ingest/claude, and /inbox/claude from it.",
+      "default": "https://mcp.mybrains.ai"
+    }
+  },
+  "mcpServers": {
+    "brains": {
+      "type": "http",
+      "url": "${user_config.endpoint}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${user_config.token}"
+      }
+    }
+  }
+}
