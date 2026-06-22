@@ -1,78 +1,28 @@
-<!-- This is a comment in Markdown 
+# brains — Claude Code plugin
 
-🛠 Repository Setup Instructions
+Your memory layer for Claude Code: Gmail, Calendar, Drive, and your prior Claude
+conversations as queryable pages — with reflexive recall, turn-by-turn capture,
+and a server-driven inbox, plus boards, automations, and workflows on top.
 
-After forking or cloning this template, run the following:
+## Install
 
-1. Replace all occurrences of 'template-repository' with your actual repo name:
-   sed -i 's/template-repository/your-repo-name/g' README.md
+Guided install (recommended): https://mybrains.ai/install/claude-code
 
-2. Fill in all TODO sections below.
+Or add the marketplace directly:
 
-3. Update [.github/CODEOWNERS](.github/CODEOWNERS) to reflect your team or maintainers.
-
-4. Check `.gitignore` and `.dockerignore` files and modify them according to your project's structure.
-
-5. Update GitHub Actions in `.github/workflows/` if needed (e.g., rename, add secrets).
-
--->
-<p align="center"><img src="https://raw.githubusercontent.com/ssvlabs/.github/refs/heads/main/assets/ssvnetwork-dark.svg" alt="SSV Network"></p>
-
-<img src="https://github.com/ssvlabs/template-repository/actions/workflows/main.yml/badge.svg" alt="Check" />
-<a href="https://discord.com/invite/ssvnetworkofficial"><img src="https://img.shields.io/badge/discord-%23ssvlabs-8A2BE2.svg" alt="Discord" /></a>
-
-## ✨ Introduction
-
-<!-- Describe the purpose of this repository. -->
-This project provides a foundational structure for [describe your use case: e.g., smart contracts, node operators, CLI tools].
-
-## ⚙️  How to Build
-
-```bash
-# Clone the repo
-git clone https://github.com/ssvlabs/template-repository.git
-
-# Navigate
-cd your-repo-name
-
-# Install dependencies
-TODO
-
-# Build the code
-TODO
+```
+claude plugin marketplace add https://github.com/ssvlabs/brains-plugins.git
+claude plugin install brains@brains
 ```
 
+You'll paste your brains API token when prompted — find it in your brains
+account settings.
 
-## 🚀 How to Run
+## Layout
 
-
-```bash
-# Run the main service
-npm start
-# or
-go run main.go
-# or
-python app.py
-```
-
-## 🧪 Testing
-
-```bash
-npm test
-# or
-go test ./...
-# or
-pytest
-```
-
-
-## Contributing
-
-We welcome community contributions!
-
-- See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-- Create a branch, push your changes, and open a PR.
+- `.claude-plugin/marketplace.json` — the marketplace manifest
+- `plugins/brains/` — the plugin (prompt, hooks, skills)
 
 ## License
 
-Repository is distributed under [GPL-3.0](LICENSE).
+[GPL-3.0](./LICENSE)

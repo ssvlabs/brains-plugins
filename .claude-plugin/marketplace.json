@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "brains",
+  "description": "The brains memory layer, as a Claude Code plugin.",
+  "owner": { "name": "ssvlabs" },
+  "plugins": [
+    {
+      "name": "brains",
+      "description": "Your memory layer: Gmail/Calendar/Drive and prior Claude conversations as queryable pages — reflexive recall, turn-by-turn capture, a server-driven inbox, and boards/automations/workflows on top.",
+      "source": "./plugins/brains",
+      "category": "productivity"
+    }
+  ]
+}
