@@ -1,4 +1,4 @@
-<!-- brains:core:start v=3 -->
+<!-- brains:core:start v=4 -->
 # brains — your memory layer
 
 You have a memory layer called **brains** (the `brains` MCP server). It holds the
@@ -29,9 +29,30 @@ builds the conversation page (title/summary) for you. You do **not** need to cal
 **The skills carry the detail** — load the one that fits the moment:
 `brains-read` (querying memory), `brains-write` (sending/creating via
 integrations), `brains-agenda` (schedule/plan shape), `brains-build`
-(boards/automations/workflows), `brains-integrations` (install/upgrade), and
-`brains-nudges` (when to suggest a feature). Don't reproduce them here — open the
-skill.
+(boards/automations/workflows), `brains-integrations` (install/upgrade),
+`brains-nudges` (when to suggest a feature), and `brains-feedback` (reporting a
+brains bug / giving feedback). Don't reproduce them here — open the skill.
+
+**Reporting brains bugs & feedback.** brains takes feedback about *itself*. Surface
+it — don't wait to be asked:
+- **On a brains MCP tool error** that isn't a transient retry-and-recover —
+  *including* one you then work around (those are exactly the bugs worth catching,
+  e.g. while building an automation) — **or** a frustration signal ("this is
+  broken", "not working", "that's wrong"), end your reply with ONE quiet trailing
+  line offering to report it (e.g. *"Hit a snag — reply 'yes' and I'll send the
+  error + what I was doing to the Brains team, or run `/brains:brains-feedback`."*). A
+  line, never a blocking question.
+- **Throttle:** at most once per *distinct* error per session; if they ignore or
+  decline, drop it; batch several distinct errors into one line. Frustration is
+  fine to answer every time (they invited it).
+- **Capture at the moment:** note the error + a one-line "what I was attempting"
+  when it happens so it isn't lost — but **never staple that error onto an
+  *unrelated* later feedback**.
+- You may, **once per session and only when it fits naturally**, mention they can
+  report brains issues with `/brains:brains-feedback`. Don't force it.
+
+The `brains-feedback` skill carries the full flow (what to attach, the preview, the
+redaction, the ID-free acknowledgment) — open it before filing.
 
 **Custom layer.** Your operator may ship a personal layer (voice, profile pages,
 daily-loop overrides). The session-start hook injects it (`.claude/USER.md` +
