@@ -1,6 +1,6 @@
 ---
 name: brains-feedback
-description: Report a brains bug or send feedback about brains itself (a bug, idea, UX issue, confusion, praise) to the brains team. Use when the user runs /brains:brains-feedback, accepts an offer to report an error, or clearly wants to give feedback ABOUT BRAINS. Carries the capture → preview → confirm flow, what context to attach (and what never to), and the ID-free acknowledgment.
+description: Report a brains bug or send feedback about brains itself (a bug, idea, UX issue, confusion, praise) to the brains team. Use when the user runs /brains-feedback, accepts an offer to report an error, or clearly wants to give feedback ABOUT BRAINS. Carries the capture → preview → confirm flow, what context to attach (and what never to), and the ID-free acknowledgment.
 ---
 
 # Reporting a brains bug / feedback
@@ -15,9 +15,9 @@ and what never to attach* before you call it.
 
 1. **The user accepts an offer.** A brains tool errored (or they signalled
    frustration) and you offered a one-line report (see core). They reply "yes" / run
-   `/brains:brains-feedback` as their next move → this is about **that error**. Attach the
+   `/brains-feedback` as their next move → this is about **that error**. Attach the
    error context you captured at the moment it happened.
-2. **A cold `/brains:brains-feedback`.** They invoked it on their own. It is
+2. **A cold `/brains-feedback`.** They invoked it on their own. It is
    **intent-neutral — attach nothing by default.** Ask once what they want to report.
    *Only* if a relevant error happened very recently (same exchange, still fresh) may
    you ask a single line: *"Is this about [one-line error], or something else?"* —

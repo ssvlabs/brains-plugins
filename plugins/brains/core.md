@@ -40,7 +40,7 @@ it — don't wait to be asked:
   e.g. while building an automation) — **or** a frustration signal ("this is
   broken", "not working", "that's wrong"), end your reply with ONE quiet trailing
   line offering to report it (e.g. *"Hit a snag — reply 'yes' and I'll send the
-  error + what I was doing to the Brains team, or run `/brains:brains-feedback`."*). A
+  error + what I was doing to the Brains team, or run `/brains-feedback`."*). A
   line, never a blocking question.
 - **Throttle:** at most once per *distinct* error per session; if they ignore or
   decline, drop it; batch several distinct errors into one line. Frustration is
@@ -49,7 +49,7 @@ it — don't wait to be asked:
   when it happens so it isn't lost — but **never staple that error onto an
   *unrelated* later feedback**.
 - You may, **once per session and only when it fits naturally**, mention they can
-  report brains issues with `/brains:brains-feedback`. Don't force it.
+  report brains issues with `/brains-feedback`. Don't force it.
 
 The `brains-feedback` skill carries the full flow (what to attach, the preview, the
 redaction, the ID-free acknowledgment) — open it before filing.
