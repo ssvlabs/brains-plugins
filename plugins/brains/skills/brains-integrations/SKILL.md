@@ -58,9 +58,10 @@ integrations in isolation.
 Over MCP: `delete_instance({ kind: 'integration', id: <install_id> })`
 (revokes + wipes the user's secrets for that install),
 `pause_integration` / `resume_integration` (stop / restart cron firings),
-`list_my_integrations` (the user's codex installs with state + cost), and
-`get_instance({ kind: 'integration', id: <install_id> })` (one install's
-metadata + health). Get the `install_id` from `list_my_integrations`.
+`list_instances({ kind: 'integration' })` (the user's codex installs with
+state + cost), and `get_instance({ kind: 'integration', id: <install_id> })`
+(one install's metadata + health). Get the `install_id` from
+`list_instances({ kind: 'integration' })`.
 
 The web UI also exposes Uninstall on each entity page with a 7-day recovery
 window; from `/recipes/<slug>` it cascades to every entity whose
