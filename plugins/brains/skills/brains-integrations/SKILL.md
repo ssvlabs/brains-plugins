@@ -18,16 +18,27 @@ per-user too. It's also the canonical answer to "what integrations do I have."
 You can install a single integration **from here over MCP** — no need to
 bounce the user to the browser for the common case:
 
-- **MCP (preferred for one integration):** `install_integration slug=<recipe>`.
-  api_key / none-auth recipes install immediately; oauth2 recipes return an
-  `authorize_url` the user opens in a browser to finish the handshake. Common
-  slugs: `gmail-inbox`, `gcalendar`, `gdrive-files`, `github-issues`,
+- **MCP (preferred for one integration):**
+  `create_instance({ kind: 'integration', spec: { slug: <recipe> } })`.
+  Returns a **discriminated envelope** — always check `status`:
+  - `{ kind: 'integration', status: 'created', install_id, ... }` — api_key /
+    none-auth recipes complete inline.
+  - `{ kind: 'integration', status: 'pending_oauth', authorize_url,
+    install_id, ... }` — oauth2 recipes need a browser handshake; you must
+    navigate the user to `authorize_url` (don't just print it — make sure the
+    user opens it) and the install lands once they finish.
+  Common slugs: `gmail-inbox`, `gcalendar`, `gdrive-files`, `github-issues`,
   `monday-items`. Idempotent — re-calling for an already-installed recipe
   returns the existing install.
+- **MCP — installing a non-integration recipe:** for boards / automations /
+  workflows / bundles published as recipes, use `install_recipe slug=<recipe>`
+  (the generic recipe-install path; works for any recipe kind, including
+  integrations, but doesn't return the OAuth envelope cleanly — so for
+  integrations specifically prefer `create_instance` above).
 - **Web UI — browse catalog:** for "what's available?" send the user to
-  `/recipes` (integrations, boards, automations, workflows, bundles). There's
-  no MCP tool to enumerate the catalog, so the web UI is the way to discover
-  slugs the user doesn't already know.
+  `/recipes` (integrations, boards, automations, workflows, bundles). Discover
+  slugs the user doesn't already know via `list_recipes` (renamed from
+  `list_starter_recipes`) or the web UI.
 - **Web UI — starter pack:** for "set me up" / "install the basics", send the
   user to `/recipes/starter-pack` — one click bootstraps the three Google
   integrations (gmail-inbox, gcalendar, gdrive-files) atomically. Bundle
@@ -44,11 +55,12 @@ integrations in isolation.
 
 ## Uninstall / manage
 
-Over MCP: `uninstall_integration install_id=<uuid>` (revokes + wipes the
-user's secrets for that install), `pause_integration` / `resume_integration`
-(stop / restart cron firings), `list_my_integrations` (the user's codex
-installs with state + cost), and `get_integration_status` (one install's
-health). Get the `install_id` from `list_my_integrations`.
+Over MCP: `delete_instance({ kind: 'integration', id: <install_id> })`
+(revokes + wipes the user's secrets for that install),
+`pause_integration` / `resume_integration` (stop / restart cron firings),
+`list_my_integrations` (the user's codex installs with state + cost), and
+`get_instance({ kind: 'integration', id: <install_id> })` (one install's
+metadata + health). Get the `install_id` from `list_my_integrations`.
 
 The web UI also exposes Uninstall on each entity page with a 7-day recovery
 window; from `/recipes/<slug>` it cascades to every entity whose
