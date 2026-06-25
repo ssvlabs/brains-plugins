@@ -1,6 +1,6 @@
 ---
 name: brains-build
-description: The catalog of higher-level brains features beyond search — boards, board skills, dataset recipes, dashboards, pages, automations, workflows, mini-sites, the Telegram bot, and the overnight digest. Use when the user wants to track a list, build a tracker/CRM, automate a recurring task, coordinate a goal with a team, publish a deck/one-pager, or asks "what can brains do." Names the right feature and the flow tool to start it.
+description: The catalog of higher-level brains features beyond search — boards, board skills, dataset recipes, dashboards, pages, automations, workflows, mini-sites, and the Telegram bot. Use when the user wants to track a list, build a tracker/CRM, automate a recurring task, coordinate a goal with a team, publish a deck/one-pager, or asks "what can brains do." Names the right feature and the flow tool to start it.
 ---
 
 # brains feature catalog
@@ -21,7 +21,6 @@ the flow carries it. `kind` is one of `'board'`, `'automation'`, `'workflow'`.
 | **Workflow** | Goal container: charter + KPIs + deadlines + roster + owned board + paused template automations; one status flip pauses/un-pauses all | "ship X by Q3", "coordinate this initiative with a team & deadline" | `create_flow({ kind: 'workflow' })` |
 | **Mini-site** | Static sandboxed HTML on a brain — deck, one-pager, dashboard | "build me a deck/one-pager", "render this board visually", "share a link" | `create_mini_site` |
 | **Telegram bot** | The brain over Telegram | "text it from my phone", "ping me without the laptop" | (point to the bot) |
-| **Overnight digest** | Auto daily/weekly read on what's coming up | "morning brief", "what should I be thinking about" | `get_overnight_digest` |
 
 ## Picking among the three that overlap
 

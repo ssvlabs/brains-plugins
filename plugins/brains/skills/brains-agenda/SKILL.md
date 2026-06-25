@@ -17,12 +17,11 @@ description: How to answer schedule / plan / agenda asks — "what's my day / we
 | "this week", "agenda", "weekly" | today 00:00 → today+6 23:59 |
 | "next week" | next Mon 00:00 → next Sun 23:59 |
 
-## Fetch (parallel — independent calls)
+## Fetch
 
-1. `list_calendar_events start=<ISO> end=<ISO> limit=100` — **use this, NOT
-   `list_pages type=calendar_event`**, which filters by ingest time not event
-   time. Returns events sorted by start with attendees/location/RSVP parsed.
-2. `get_overnight_digest` (no args = latest personal digest) — optional context.
+`list_calendar_events start=<ISO> end=<ISO> limit=100` — **use this, NOT
+`list_pages type=calendar_event`**, which filters by ingest time not event
+time. Returns events sorted by start with attendees/location/RSVP parsed.
 
 If `list_calendar_events` returns 0 for the window, the ingestor may be behind:
 `fetch_from_integration source=calendar request="events from <start> through
@@ -38,19 +37,4 @@ with ⚠️ and note declined RSVPs, but never silently drop.
 
 ### Schedule
 <events grouped by day: time · title · location/attendees · RSVP status>
-
-### Last night's read on things
-<the 'tomorrow' lens for daily asks; the 'thoughts' lens for weekly asks>
-_(from overnight digest dated <local day>)_
-
-### Decisions / open loops
-<daily asks only: the '→ Action:' lines from the digest's 'connections' lens,
- one bullet each, verbatim. Omit the rest of the connections lens — the action
- lines are the load-bearing part.>
 ```
-
-If `get_overnight_digest` returns `{found:false}`, omit **both** "Last night's read"
-and "Decisions / open loops" silently — don't say "no digest available."
-
-If the connections lens is `(no connections worth surfacing this window)` or has no
-`→ Action:` lines, omit "Decisions / open loops" silently — same rule.
