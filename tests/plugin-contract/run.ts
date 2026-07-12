@@ -60,6 +60,16 @@ for (const command of [...hookScripts(claudeHooks), ...hookScripts(codexHooks)])
   assert((statSync(script).mode & 0o111) !== 0, `hook script is not executable: ${match[1]}`);
 }
 
+// Claude Code auto-loads hooks/hooks.json IN ADDITION to the manifest's hooks
+// file, so every Codex command must no-op when the plugin scripts don't resolve
+// under ${PLUGIN_ROOT} (unset in the Claude runtime).
+for (const command of hookScripts(codexHooks)) {
+  assert(
+    /^\[ -x "\$\{PLUGIN_ROOT\}\/hooks\/brains-[a-z-]+\.sh" \] \|\| exit 0; /.test(command),
+    `Codex hook command must guard against the Claude runtime: ${command}`,
+  );
+}
+
 assert(codexMcp.mcpServers?.brains?.type === "http", "Codex brains MCP must be HTTP");
 assert(codexMcp.mcpServers?.brains?.url === "https://mcp.mybrains.ai/mcp", "Codex brains MCP URL mismatch");
 assert(codexMcp.mcpServers?.brains?.bearer_token_env_var === "BRAINS_API_TOKEN", "Codex token env mismatch");

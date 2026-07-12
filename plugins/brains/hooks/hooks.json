@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "BRAINS_STATE_DIR=\"${PLUGIN_DATA}\" \"${PLUGIN_ROOT}\"/hooks/brains-start.sh",
+            "command": "[ -x \"${PLUGIN_ROOT}/hooks/brains-start.sh\" ] || exit 0; BRAINS_STATE_DIR=\"${PLUGIN_DATA}\" \"${PLUGIN_ROOT}\"/hooks/brains-start.sh",
             "statusMessage": "Loading brains memory"
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "BRAINS_STATE_DIR=\"${PLUGIN_DATA}\" \"${PLUGIN_ROOT}\"/hooks/brains-turn.sh"
+            "command": "[ -x \"${PLUGIN_ROOT}/hooks/brains-turn.sh\" ] || exit 0; BRAINS_STATE_DIR=\"${PLUGIN_DATA}\" \"${PLUGIN_ROOT}\"/hooks/brains-turn.sh"
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "BRAINS_STATE_DIR=\"${PLUGIN_DATA}\" \"${PLUGIN_ROOT}\"/hooks/brains-turn.sh"
+            "command": "[ -x \"${PLUGIN_ROOT}/hooks/brains-turn.sh\" ] || exit 0; BRAINS_STATE_DIR=\"${PLUGIN_DATA}\" \"${PLUGIN_ROOT}\"/hooks/brains-turn.sh"
           }
         ]
       }
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "BRAINS_STATE_DIR=\"${PLUGIN_DATA}\" \"${PLUGIN_ROOT}\"/hooks/brains-tool-error.sh"
+            "command": "[ -x \"${PLUGIN_ROOT}/hooks/brains-tool-error.sh\" ] || exit 0; BRAINS_STATE_DIR=\"${PLUGIN_DATA}\" \"${PLUGIN_ROOT}\"/hooks/brains-tool-error.sh"
           }
         ]
       }

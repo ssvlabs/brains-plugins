@@ -158,8 +158,16 @@ async function runPluginHook(opts: {
   client?: "claude" | "codex";
 }): Promise<RunResult> {
   return new Promise((resolveRun) => {
+    // Scrub the Codex runtime markers and any real API token from the
+    // inherited environment — a developer shell with BRAINS_API_TOKEN
+    // exported (or a Codex-launched shell with PLUGIN_ROOT/PLUGIN_DATA set)
+    // must not flip client detection or outrank the test token.
+    const inherited = { ...process.env };
+    delete inherited.BRAINS_API_TOKEN;
+    delete inherited.PLUGIN_ROOT;
+    delete inherited.PLUGIN_DATA;
     const env = {
-      ...process.env,
+      ...inherited,
       BRAINS_STATE_DIR: opts.stateDir,
       // Pin the marketplaces file so auto-update detection is hermetic and
       // never reads the developer's real ~/.claude. Default to an absent path

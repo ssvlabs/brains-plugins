@@ -68,16 +68,15 @@ elif [ -n "$LAST_ASSISTANT" ] || [ -n "$TRANSCRIPT" ]; then
   # ---- Stop: ingest the last assistant text block, drain notifications ------
   ACTIVE=$(printf '%s' "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)
   [ "$ACTIVE" = "true" ] && exit 0
-  if [ -n "$LAST_ASSISTANT" ]; then
-    # Codex exposes the stable last message directly on Stop. Prefer it over
-    # parsing transcript_path, whose format is explicitly not stable.
-    CONTENT="$LAST_ASSISTANT"
-  else
-    [ -f "$TRANSCRIPT" ] || exit 0
-    # Claude transcript fallback.
+  # Claude keeps its original path: parse the transcript. Codex has no stable
+  # transcript format, so outside the Claude runtime (or if the parse yields
+  # nothing) use the last_assistant_message field from the payload instead.
+  CONTENT=""
+  if [ -z "${PLUGIN_ROOT:-}" ] && [ -f "$TRANSCRIPT" ]; then
     CONTENT=$(jq -rs '[.[] | select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text] | last // ""' \
       "$TRANSCRIPT" 2>/dev/null)
   fi
+  [ -z "$CONTENT" ] && CONTENT="$LAST_ASSISTANT"
   ingest assistant "$CONTENT"
 
   [ -x "$LIB" ] && "$LIB" stop "$SESSION"
