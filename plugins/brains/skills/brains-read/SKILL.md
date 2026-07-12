@@ -1,6 +1,6 @@
 ---
 name: brains-read
-description: How to read the user's memory (Gmail, Calendar, Drive, prior Claude chats) from brains. Use when the user asks about a person, project, email, doc, meeting, "what did I see / say / tell you," or anything about their life or past work. Covers picking the cheapest query tool, multi-step lookups, citing sources, and what to do when a read comes up empty.
+description: How to read the user's memory (Gmail, Calendar, Drive, prior AI chats) from brains. Use when the user asks about a person, project, email, doc, meeting, "what did I see / say / tell you," or anything about their life or past work. Covers picking the cheapest query tool, multi-step lookups, citing sources, and what to do when a read comes up empty.
 ---
 
 # Reading memory from brains

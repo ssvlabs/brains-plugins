@@ -6,8 +6,8 @@
 #   mode: startup | prompt | stop
 #
 # This is the v0.2 inbox dispatcher, adapted for the plugin runtime:
-#   - token/endpoint come from plugin userConfig (CLAUDE_PLUGIN_OPTION_*)
-#   - state (log / device-id / state.json) lives in CLAUDE_PLUGIN_DATA
+#   - token/endpoint come from Claude userConfig or Codex BRAINS_API_TOKEN
+#   - state (log / device-id / state.json) lives in plugin persistent data
 #   - the device "sections" report scans the plugin's core.md (not a CLAUDE.md)
 # The HTTP protocol (devices / inbox / ack) is IDENTICAL to the standalone hook.
 #
@@ -32,7 +32,7 @@ SESSION="${2:-}"
 [ -z "$SESSION" ] && exit 0
 
 # --- config: plugin userConfig first, env overrides for tests --------------
-TOKEN="${CLAUDE_PLUGIN_OPTION_TOKEN:-${BRAINS_INBOX_TOKEN:-}}"
+TOKEN="${CLAUDE_PLUGIN_OPTION_TOKEN:-${BRAINS_API_TOKEN:-${BRAINS_INBOX_TOKEN:-}}}"
 [ -z "$TOKEN" ] && exit 0
 
 BASE="${CLAUDE_PLUGIN_OPTION_ENDPOINT:-${BRAINS_ENDPOINT:-https://mcp.mybrains.ai}}"
@@ -42,12 +42,14 @@ ACK_ENDPOINT="${BRAINS_INBOX_ACK_URL:-${ENDPOINT}/ack}"
 DEVICES_ENDPOINT="${BRAINS_INBOX_DEVICES_URL:-${ENDPOINT}/devices}"
 
 # --- paths: plugin code dir (ephemeral) vs data dir (persistent) -----------
+CODEX_PLUGIN_RUNTIME=0
+[ -n "${PLUGIN_ROOT:-}" ] && CODEX_PLUGIN_RUNTIME=1
 SELF="${BASH_SOURCE[0]}"
 LIB_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 PLUGIN_ROOT="$(cd "$LIB_DIR/../.." && pwd)"
 CORE_MD="${BRAINS_CORE_MD:-$PLUGIN_ROOT/core.md}"
 
-STATE_DIR="${BRAINS_STATE_DIR:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/brains}}"
+STATE_DIR="${BRAINS_STATE_DIR:-${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/brains}}}"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 LOG="$STATE_DIR/brains.log"
 STATE_FILE="$STATE_DIR/brains-state.json"
@@ -98,25 +100,34 @@ if [ "$MODE" = "startup" ]; then
   HOSTNAME_VAL=$(hostname 2>/dev/null || printf 'unknown')
   # Plugin semver from the manifest — lets the server tell which release a
   # device runs. Empty/unreadable manifest just omits the field; never fatal.
-  PLUGIN_VERSION=$(jq -r '.version // empty' "$PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null || printf '')
+  if [ "$CODEX_PLUGIN_RUNTIME" = "1" ] && [ -f "$PLUGIN_ROOT/.codex-plugin/plugin.json" ]; then
+    CLIENT="codex"
+    PLUGIN_VERSION=$(jq -r '.version // empty' "$PLUGIN_ROOT/.codex-plugin/plugin.json" 2>/dev/null || printf '')
+  else
+    CLIENT="claude"
+    PLUGIN_VERSION=$(jq -r '.version // empty' "$PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null || printf '')
+  fi
   # Marketplace auto-update state. The marketplace name is the path segment
   # under plugins/cache/<name>/… ; fall back to "brains" when off-cache.
   # autoUpdate is a per-marketplace boolean (key absent = off); anything we
   # can't parse stays unknown ("") so we neither report nor nudge.
-  MARKETPLACE="brains"
-  case "$PLUGIN_ROOT" in
-    */plugins/cache/*) _mp="${PLUGIN_ROOT#*/plugins/cache/}"; _mp="${_mp%%/*}"; [ -n "$_mp" ] && MARKETPLACE="$_mp" ;;
-  esac
-  MARKETPLACES_JSON="${BRAINS_MARKETPLACES_JSON:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json}"
   AUTO_UPDATE=""
-  [ -f "$MARKETPLACES_JSON" ] && AUTO_UPDATE=$(jq -r --arg m "$MARKETPLACE" \
-    'if .[$m].autoUpdate == true then "true" else "false" end' "$MARKETPLACES_JSON" 2>/dev/null || printf '')
+  MARKETPLACE="brains"
+  if [ "$CLIENT" = "claude" ]; then
+    case "$PLUGIN_ROOT" in
+      */plugins/cache/*) _mp="${PLUGIN_ROOT#*/plugins/cache/}"; _mp="${_mp%%/*}"; [ -n "$_mp" ] && MARKETPLACE="$_mp" ;;
+    esac
+    MARKETPLACES_JSON="${BRAINS_MARKETPLACES_JSON:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json}"
+    [ -f "$MARKETPLACES_JSON" ] && AUTO_UPDATE=$(jq -r --arg m "$MARKETPLACE" \
+      'if .[$m].autoUpdate == true then "true" else "false" end' "$MARKETPLACES_JSON" 2>/dev/null || printf '')
+  fi
   REPORT_BODY=$(jq -nc \
     --arg h "$HOSTNAME_VAL" \
     --arg pv "$PLUGIN_VERSION" \
     --arg au "$AUTO_UPDATE" \
     --argjson s "$SECTIONS_JSON" \
-    '{hostname:$h, sections:$s, client:"claude", client_type:"cli"}
+    --arg client "$CLIENT" \
+    '{hostname:$h, sections:$s, client:$client, client_type:"cli"}
      + (if $pv != "" then {plugin_version:$pv} else {} end)
      + (if $au != "" then {auto_update: ($au == "true")} else {} end)')
   REPORT_RESP=$(curl -sS --max-time 4 -X POST \
@@ -142,13 +153,17 @@ if [ "$MODE" = "startup" ]; then
     | if . == null then empty
       else "core v\(.installed // 0) -> v\(.canonical)" end' 2>/dev/null)
   if [ -n "$DRIFT_LINE" ]; then
-    printf '%s\n' '<!-- brains:update -->brains plugin update available ('"$DRIFT_LINE"'): offer to run `claude plugin marketplace update brains && claude plugin update brains`, then /reload-plugins<!-- /brains:update -->'
+    if [ "$CLIENT" = "codex" ]; then
+      printf '%s\n' '<!-- brains:update -->brains plugin update available ('"$DRIFT_LINE"'): offer to run `codex plugin marketplace upgrade brains && codex plugin add brains@brains`, then start a new thread<!-- /brains:update -->'
+    else
+      printf '%s\n' '<!-- brains:update -->brains plugin update available ('"$DRIFT_LINE"'): offer to run `claude plugin marketplace update brains && claude plugin update brains`, then /reload-plugins<!-- /brains:update -->'
+    fi
     log "drift nudge: $DRIFT_LINE"
   fi
   # Auto-update OFF → nudge exactly once per device (marker in STATE_DIR), so
   # we never re-raise it even if the user declines. Unknown state never nudges.
   AUTOUPD_MARKER="$STATE_DIR/autoupd-nudged"
-  if [ "$AUTO_UPDATE" = "false" ] && [ ! -f "$AUTOUPD_MARKER" ]; then
+  if [ "$CLIENT" = "claude" ] && [ "$AUTO_UPDATE" = "false" ] && [ ! -f "$AUTOUPD_MARKER" ]; then
     printf '%s\n' '<!-- brains:autoupdate -->auto-update is OFF for the brains plugin marketplace. Offer once to enable it (then never raise it again): on yes, set `.'"$MARKETPLACE"'.autoUpdate = true` in ~/.claude/plugins/known_marketplaces.json via jq (back the file up first); if anything fails, tell the user to use /plugin -> Marketplaces -> brains -> Enable auto-update.<!-- /brains:autoupdate -->'
     printf '%s' '1' > "$AUTOUPD_MARKER" 2>/dev/null || true
     log "auto-update nudge emitted (marketplace=$MARKETPLACE)"

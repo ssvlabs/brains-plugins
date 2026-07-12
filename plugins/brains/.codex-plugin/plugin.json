@@ -1,0 +1,30 @@
+{
+  "name": "brains",
+  "version": "2.3.0",
+  "description": "Your personal memory layer for Codex: query Gmail, Calendar, Drive, and prior conversations, then build boards, automations, and workflows.",
+  "author": {
+    "name": "brains (ssvlabs)",
+    "url": "https://mybrains.ai"
+  },
+  "homepage": "https://mybrains.ai",
+  "repository": "https://github.com/ssvlabs/brains-plugins",
+  "license": "GPL-3.0",
+  "keywords": ["memory", "productivity", "gmail", "calendar", "drive", "automation"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Brains",
+    "shortDescription": "Your personal memory layer",
+    "longDescription": "Query your Gmail, Calendar, Drive, and prior AI conversations from Codex, with automatic context and capture plus boards, automations, workflows, and feedback flows.",
+    "developerName": "ssvlabs",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write", "Automate"],
+    "websiteURL": "https://mybrains.ai",
+    "defaultPrompt": [
+      "What should I know about today?",
+      "Find what I discussed about this project.",
+      "Help me build a tracker from my memory."
+    ],
+    "brandColor": "#6D5EF5"
+  }
+}

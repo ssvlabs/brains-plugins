@@ -20,7 +20,7 @@
 # Backgrounded curl + max-time so it never slows the harness.
 set -u
 
-TOKEN="${CLAUDE_PLUGIN_OPTION_TOKEN:-${BRAINS_INBOX_TOKEN:-}}"
+TOKEN="${CLAUDE_PLUGIN_OPTION_TOKEN:-${BRAINS_API_TOKEN:-${BRAINS_INBOX_TOKEN:-}}}"
 [ -z "$TOKEN" ] && exit 0
 BASE="${CLAUDE_PLUGIN_OPTION_ENDPOINT:-${BRAINS_ENDPOINT:-https://mcp.mybrains.ai}}"
 BASE="${BASE%/}"
@@ -35,6 +35,7 @@ SESSION=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 
 PROMPT=$(printf '%s' "$INPUT" | jq -r '.prompt // empty' 2>/dev/null)
 TRANSCRIPT=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
+LAST_ASSISTANT=$(printf '%s' "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null)
 
 ingest() {  # role, content
   local role="$1" content="$2"
@@ -63,13 +64,20 @@ if [ -n "$PROMPT" ]; then
 
   [ -x "$LIB" ] && "$LIB" prompt "$SESSION"
 
-elif [ -n "$TRANSCRIPT" ]; then
+elif [ -n "$LAST_ASSISTANT" ] || [ -n "$TRANSCRIPT" ]; then
   # ---- Stop: ingest the last assistant text block, drain notifications ------
   ACTIVE=$(printf '%s' "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)
   [ "$ACTIVE" = "true" ] && exit 0
-  [ -f "$TRANSCRIPT" ] || exit 0
-  CONTENT=$(jq -rs '[.[] | select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text] | last // ""' \
-    "$TRANSCRIPT" 2>/dev/null)
+  if [ -n "$LAST_ASSISTANT" ]; then
+    # Codex exposes the stable last message directly on Stop. Prefer it over
+    # parsing transcript_path, whose format is explicitly not stable.
+    CONTENT="$LAST_ASSISTANT"
+  else
+    [ -f "$TRANSCRIPT" ] || exit 0
+    # Claude transcript fallback.
+    CONTENT=$(jq -rs '[.[] | select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text] | last // ""' \
+      "$TRANSCRIPT" 2>/dev/null)
+  fi
   ingest assistant "$CONTENT"
 
   [ -x "$LIB" ] && "$LIB" stop "$SESSION"

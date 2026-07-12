@@ -36,7 +36,7 @@ exercise the shared notification/prompt/context/ack contract:
 - 12 utf-8 multibyte content (incl. RTL) survives banner + injection
 - 13–24 large/bulk/sequential bodies + context_items ack round-trips
 
-Scenarios 25–31 cover the plugin-only surface — the semver report and the
+Scenarios 25–32 cover the plugin-only surface — the semver report and the
 drift-aware update / auto-update nudge:
 
 - 25 plugin hook reports `plugin_version` + core marker; no drift → no nudge
@@ -46,6 +46,7 @@ drift-aware update / auto-update nudge:
 - 29 auto-update OFF → nudge once + report `auto_update=false`; 2nd run silent
 - 30 auto-update ON → no nudge + report `auto_update=true`
 - 31 marketplaces file missing → no nudge + report omits `auto_update`
+- 32 Codex runtime reports the Codex manifest/client and emits the Codex update command
 
 The plugin scenarios pin `BRAINS_MARKETPLACES_JSON` to a temp path so
 auto-update detection never reads the developer's real `~/.claude`.
