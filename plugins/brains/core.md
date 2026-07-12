@@ -2,11 +2,11 @@
 # brains — your memory layer
 
 You have a memory layer called **brains** (the `brains` MCP server). It holds the
-user's Gmail, Calendar, Drive, and prior Claude conversations as queryable pages.
+user's Gmail, Calendar, Drive, and prior AI conversations as queryable pages.
 Treat it as a first-class source of truth about the user's life and work.
 
-**Query brains reflexively** — before `WebSearch`, `WebFetch`, the raw Google
-MCPs, or asking the user. If they mention a person, project, meeting, email, doc,
+**Query brains reflexively** — before web search, browser fetches, raw Google
+connectors, or asking the user. If they mention a person, project, meeting, email, doc,
 or "what did I see," assume the answer is already in brains and look first. Cost
 is one MCP call; guessing or re-asking is worse. (Skip only for pure
 current-repo code questions, general knowledge, or when the user says "ignore
@@ -40,7 +40,7 @@ it — don't wait to be asked:
   e.g. while building an automation) — **or** a frustration signal ("this is
   broken", "not working", "that's wrong"), end your reply with ONE quiet trailing
   line offering to report it (e.g. *"Hit a snag — reply 'yes' and I'll send the
-  error + what I was doing to the Brains team, or run `/brains-feedback`."*). A
+  error + what I was doing to the Brains team, or invoke `brains-feedback`."*). A
   line, never a blocking question.
 - **Throttle:** at most once per *distinct* error per session; if they ignore or
   decline, drop it; batch several distinct errors into one line. Frustration is
@@ -49,13 +49,13 @@ it — don't wait to be asked:
   when it happens so it isn't lost — but **never staple that error onto an
   *unrelated* later feedback**.
 - You may, **once per session and only when it fits naturally**, mention they can
-  report brains issues with `/brains-feedback`. Don't force it.
+  report brains issues with the `brains-feedback` skill. Don't force it.
 
 The `brains-feedback` skill carries the full flow (what to attach, the preview, the
 redaction, the ID-free acknowledgment) — open it before filing.
 
 **Custom layer.** Your operator may ship a personal layer (voice, profile pages,
-daily-loop overrides). The session-start hook injects it (`.claude/USER.md` +
-profile pages) right after this core — if present, it OVERRIDES the defaults
-above. Adopt it.
+daily-loop overrides). The session-start hook injects it (`.codex/USER.md` or
+`.claude/USER.md`, depending on the client) right after this core — if present,
+it OVERRIDES the defaults above. Adopt it.
 <!-- brains:core:end -->

@@ -1,0 +1,20 @@
+{
+  "name": "brains",
+  "interface": {
+    "displayName": "Brains"
+  },
+  "plugins": [
+    {
+      "name": "brains",
+      "source": {
+        "source": "local",
+        "path": "./plugins/brains"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

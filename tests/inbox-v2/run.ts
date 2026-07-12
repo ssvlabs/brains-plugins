@@ -35,6 +35,9 @@ const PLUGIN_HOOK_PATH = join(
 const PLUGIN_JSON_PATH = join(
   REPO_ROOT, "plugins", "brains", ".claude-plugin", "plugin.json",
 );
+const CODEX_PLUGIN_JSON_PATH = join(
+  REPO_ROOT, "plugins", "brains", ".codex-plugin", "plugin.json",
+);
 
 type Action = {
   id: string;
@@ -152,10 +155,19 @@ async function runPluginHook(opts: {
   port: number;
   stateDir: string;
   marketplacesJson?: string;
+  client?: "claude" | "codex";
 }): Promise<RunResult> {
   return new Promise((resolveRun) => {
+    // Scrub the Codex runtime markers and any real API token from the
+    // inherited environment — a developer shell with BRAINS_API_TOKEN
+    // exported (or a Codex-launched shell with PLUGIN_ROOT/PLUGIN_DATA set)
+    // must not flip client detection or outrank the test token.
+    const inherited = { ...process.env };
+    delete inherited.BRAINS_API_TOKEN;
+    delete inherited.PLUGIN_ROOT;
+    delete inherited.PLUGIN_DATA;
     const env = {
-      ...process.env,
+      ...inherited,
       BRAINS_STATE_DIR: opts.stateDir,
       // Pin the marketplaces file so auto-update detection is hermetic and
       // never reads the developer's real ~/.claude. Default to an absent path
@@ -166,6 +178,9 @@ async function runPluginHook(opts: {
       BRAINS_INBOX_ACK_URL: `http://127.0.0.1:${opts.port}/inbox/claude/ack`,
       BRAINS_INBOX_DEVICES_URL: `http://127.0.0.1:${opts.port}/inbox/claude/devices`,
       BRAINS_INBOX_TOKEN: "test-token",
+      ...(opts.client === "codex"
+        ? { PLUGIN_ROOT: join(REPO_ROOT, "plugins", "brains"), PLUGIN_DATA: opts.stateDir }
+        : {}),
     };
     const proc = spawn("bash", [PLUGIN_HOOK_PATH, opts.mode, opts.session], { env });
     let stdout = "";
@@ -933,6 +948,26 @@ const SCENARIOS: Scenario[] = [
       if (existsSync(join(stateDir, "autoupd-nudged"))) {
         throw new AssertionError("31 marker must NOT be written when state is unknown");
       }
+      rmSync(stateDir, { recursive: true, force: true });
+    },
+  },
+  {
+    name: "32 — Codex runtime reports Codex manifest and emits Codex update command",
+    async run(server) {
+      server.setInbox("startup", { context: "", actions: [] });
+      server.setDeviceDrift([{ section: "core", installed: 3, canonical: 4 }]);
+      const stateDir = makeStateDir("32");
+      const r = await runPluginHook({
+        mode: "startup", session: "s32", port: PORT, stateDir, client: "codex",
+      });
+      assertEqual(r.exitCode, 0, "32 exit code");
+      const report = server.getDeviceReports()[0] as Record<string, unknown>;
+      const manifest = JSON.parse(readFileSync(CODEX_PLUGIN_JSON_PATH, "utf8")) as { version: string };
+      assertEqual(report.client, "codex", "32 report carries client=codex");
+      assertEqual(report.plugin_version, manifest.version, "32 uses Codex manifest version");
+      assertEqual(report.auto_update, undefined, "32 omits Claude-only auto-update state");
+      assertContains(r.stdout, "codex plugin marketplace upgrade brains", "32 Codex update command");
+      assertNotContains(r.stdout, "claude plugin marketplace update", "32 no Claude update command");
       rmSync(stateDir, { recursive: true, force: true });
     },
   },
