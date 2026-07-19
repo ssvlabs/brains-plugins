@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..", "..");
@@ -87,5 +89,55 @@ assert(
   turnHook.includes('client:$client, client_type:"cli"'),
   "turn ingest payload must include the detected client and CLI type",
 );
+assert(
+  turnHook.includes("codex mcp get brains --json"),
+  "Codex turn capture must reuse persisted MCP authentication when no token env is present",
+);
+assert(
+  turnHook.includes(".transport.http_headers.Authorization"),
+  "Codex turn capture must read the configured MCP Authorization header",
+);
+
+// Exercise the standalone Codex path without a token env. The fake `codex`
+// exposes the same persisted Authorization shape as `codex mcp get`, while the
+// fake `curl` captures only POST bodies (the inbox GET remains a no-op).
+const temp = mkdtempSync(join(tmpdir(), "brains-plugin-contract-"));
+try {
+  const bin = join(temp, "bin");
+  const capture = join(temp, "payloads.jsonl");
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, "codex"),
+    '#!/bin/sh\nprintf \'%s\\n\' \'{"transport":{"http_headers":{"Authorization":"Bearer configured-token"}}}\'\n',
+  );
+  writeFileSync(
+    join(bin, "curl"),
+    '#!/bin/sh\nprev=""\nfor arg in "$@"; do\n  if [ "$prev" = "-d" ]; then printf \'%s\\n\' "$arg" >> "$CAPTURE_FILE"; fi\n  prev="$arg"\ndone\n',
+  );
+  chmodSync(join(bin, "codex"), 0o755);
+  chmodSync(join(bin, "curl"), 0o755);
+
+  const result = spawnSync("bash", [join(PLUGIN, "hooks", "brains-turn.sh")], {
+    input: JSON.stringify({ session_id: "codex-session", prompt: "hello" }),
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      PLUGIN_ROOT: PLUGIN,
+      BRAINS_API_TOKEN: "",
+      BRAINS_INBOX_TOKEN: "",
+      CLAUDE_PLUGIN_OPTION_TOKEN: "",
+      BRAINS_STATE_DIR: join(temp, "state"),
+      CAPTURE_FILE: capture,
+    },
+  });
+  assert(result.status === 0, `standalone Codex turn hook failed: ${result.stderr.toString()}`);
+  const payloads = readFileSync(capture, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert(payloads.length === 1, "standalone Codex turn hook must POST exactly one ingest payload");
+  assert(payloads[0].client === "codex", "standalone Codex payload must identify Codex");
+  assert(payloads[0].client_type === "cli", "standalone Codex payload must identify the CLI surface");
+  assert(payloads[0].content === "hello", "standalone Codex payload must preserve the prompt");
+} finally {
+  rmSync(temp, { recursive: true, force: true });
+}
 
 console.log("plugin contract: PASS");

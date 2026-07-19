@@ -20,18 +20,28 @@
 # Backgrounded curl + max-time so it never slows the harness.
 set -u
 
+# The same hook implementation serves both clients. Codex defines PLUGIN_ROOT;
+# Claude Code invokes the explicit claude-hooks.json map without it.
+CLIENT="claude"
+[ -n "${PLUGIN_ROOT:-}" ] && CLIENT="codex"
+
 TOKEN="${CLAUDE_PLUGIN_OPTION_TOKEN:-${BRAINS_API_TOKEN:-${BRAINS_INBOX_TOKEN:-}}}"
+# Desktop-launched Codex receives BRAINS_API_TOKEN directly. A standalone
+# Codex CLI can instead have an authenticated MCP transport with a persisted
+# Authorization header, so reuse that same credential for automatic capture.
+# `codex mcp get` is a local config read; its output is never logged.
+if [ -z "$TOKEN" ] && [ "$CLIENT" = "codex" ] && command -v codex >/dev/null 2>&1; then
+  AUTH_HEADER=$(codex mcp get brains --json 2>/dev/null \
+    | jq -r '.transport.http_headers.Authorization // .transport.http_headers.authorization // empty' 2>/dev/null)
+  case "$AUTH_HEADER" in
+    "Bearer "*) TOKEN="${AUTH_HEADER#Bearer }" ;;
+  esac
+  unset AUTH_HEADER
+fi
 [ -z "$TOKEN" ] && exit 0
 BASE="${CLAUDE_PLUGIN_OPTION_ENDPOINT:-${BRAINS_ENDPOINT:-https://mcp.mybrains.ai}}"
 BASE="${BASE%/}"
 INGEST="${BRAINS_INGEST_URL:-$BASE/ingest/claude}"
-
-# The same hook implementation serves both clients. Codex defines PLUGIN_ROOT;
-# Claude Code invokes the explicit claude-hooks.json map without it. Send the
-# runtime explicitly so the ingest service can keep Codex and Claude sessions
-# distinct instead of treating every hook capture as Claude.
-CLIENT="claude"
-[ -n "${PLUGIN_ROOT:-}" ] && CLIENT="codex"
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$HOOK_DIR/lib/brains-inbox.sh"
