@@ -30,6 +30,7 @@ const codexMarketplace = readJson(join(ROOT, ".agents", "plugins", "marketplace.
 const claudeHooks = readJson(join(PLUGIN, "hooks", "claude-hooks.json"));
 const codexHooks = readJson(join(PLUGIN, "hooks", "hooks.json"));
 const codexMcp = readJson(join(PLUGIN, ".mcp.json"));
+const turnHook = readFileSync(join(PLUGIN, "hooks", "brains-turn.sh"), "utf8");
 
 assert(claudeManifest.name === "brains", "Claude manifest name must be brains");
 assert(codexManifest.name === "brains", "Codex manifest name must be brains");
@@ -73,5 +74,18 @@ for (const command of hookScripts(codexHooks)) {
 assert(codexMcp.mcpServers?.brains?.type === "http", "Codex brains MCP must be HTTP");
 assert(codexMcp.mcpServers?.brains?.url === "https://mcp.mybrains.ai/mcp", "Codex brains MCP URL mismatch");
 assert(codexMcp.mcpServers?.brains?.bearer_token_env_var === "BRAINS_API_TOKEN", "Codex token env mismatch");
+
+assert(
+  turnHook.includes('CLIENT="claude"'),
+  "shared turn hook must default Claude Code captures to the Claude CLI",
+);
+assert(
+  turnHook.includes('[ -n "${PLUGIN_ROOT:-}" ] && CLIENT="codex"'),
+  "shared turn hook must identify the Codex plugin runtime as the Codex CLI",
+);
+assert(
+  turnHook.includes('client:$client, client_type:"cli"'),
+  "turn ingest payload must include the detected client and CLI type",
+);
 
 console.log("plugin contract: PASS");

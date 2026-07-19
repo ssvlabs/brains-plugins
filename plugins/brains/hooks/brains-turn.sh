@@ -26,6 +26,13 @@ BASE="${CLAUDE_PLUGIN_OPTION_ENDPOINT:-${BRAINS_ENDPOINT:-https://mcp.mybrains.a
 BASE="${BASE%/}"
 INGEST="${BRAINS_INGEST_URL:-$BASE/ingest/claude}"
 
+# The same hook implementation serves both clients. Codex defines PLUGIN_ROOT;
+# Claude Code invokes the explicit claude-hooks.json map without it. Send the
+# runtime explicitly so the ingest service can keep Codex and Claude sessions
+# distinct instead of treating every hook capture as Claude.
+CLIENT="claude"
+[ -n "${PLUGIN_ROOT:-}" ] && CLIENT="codex"
+
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$HOOK_DIR/lib/brains-inbox.sh"
 
@@ -41,8 +48,8 @@ ingest() {  # role, content
   local role="$1" content="$2"
   [ -z "$content" ] && return 0
   local payload
-  payload=$(jq -nc --arg s "$SESSION" --arg r "$role" --arg c "$content" \
-    '{session_id:$s, role:$r, content:$c}')
+  payload=$(jq -nc --arg s "$SESSION" --arg r "$role" --arg c "$content" --arg client "$CLIENT" \
+    '{session_id:$s, role:$r, content:$c, client:$client, client_type:"cli"}')
   ( curl -s --max-time 5 -X POST "$INGEST" \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
