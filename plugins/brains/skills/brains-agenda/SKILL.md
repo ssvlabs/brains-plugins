@@ -22,7 +22,10 @@ description: How to answer schedule / plan / agenda asks — "what's my day / we
 1. `list_calendar_events start=<ISO> end=<ISO> limit=100` — **use this, NOT
    `list_pages type=calendar_event`**, which filters by ingest time not event
    time. Returns events sorted by start with attendees/location/RSVP parsed.
-2. `get_overnight_digest` (no args = latest personal digest) — optional context.
+2. The latest daily brief — optional context. There is no digest tool; the brief
+   is a board row written by the My Day recipe. `list_boards` → find "Daily
+   digests" → `get_board board_id=<id> dataset=<name>` and take the newest row.
+   Skip silently if the user doesn't have that board.
 
 If `list_calendar_events` returns 0 for the window, the ingestor may be behind:
 `fetch_from_integration source=calendar request="events from <start> through
@@ -40,17 +43,18 @@ with ⚠️ and note declined RSVPs, but never silently drop.
 <events grouped by day: time · title · location/attendees · RSVP status>
 
 ### Last night's read on things
-<the 'tomorrow' lens for daily asks; the 'thoughts' lens for weekly asks>
-_(from overnight digest dated <local day>)_
+<the brief's narrative bullets>
+_(from the daily brief dated <local day>)_
 
 ### Decisions / open loops
-<daily asks only: the '→ Action:' lines from the digest's 'connections' lens,
- one bullet each, verbatim. Omit the rest of the connections lens — the action
- lines are the load-bearing part.>
+<daily asks only: the brief's action / follow-up lines, one bullet each,
+ verbatim. Omit the surrounding narrative — the action lines are the
+ load-bearing part.>
 ```
 
-If `get_overnight_digest` returns `{found:false}`, omit **both** "Last night's read"
-and "Decisions / open loops" silently — don't say "no digest available."
+If there's no "Daily digests" board or no row for the window, omit **both** "Last
+night's read" and "Decisions / open loops" silently — don't say "no digest
+available."
 
-If the connections lens is `(no connections worth surfacing this window)` or has no
-`→ Action:` lines, omit "Decisions / open loops" silently — same rule.
+If the brief has no action / follow-up lines, omit "Decisions / open loops"
+silently — same rule.
