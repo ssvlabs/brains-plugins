@@ -18,6 +18,15 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new AssertionError(message);
 }
 
+async function waitForFile(path: string, timeoutMs = 1_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) return true;
+    await Bun.sleep(10);
+  }
+  return existsSync(path);
+}
+
 function hookScripts(config: any): string[] {
   return Object.values(config.hooks ?? {}).flatMap((groups: any) =>
     groups.flatMap((group: any) => group.hooks ?? [])
@@ -112,7 +121,7 @@ try {
   );
   writeFileSync(
     join(bin, "curl"),
-    '#!/bin/sh\nprev=""\nfor arg in "$@"; do\n  if [ "$prev" = "-d" ]; then printf \'%s\\n\' "$arg" >> "$CAPTURE_FILE"; fi\n  prev="$arg"\ndone\n',
+    '#!/bin/sh\n[ "${SLOW_CAPTURE:-}" = "1" ] && sleep 0.2\nprev=""\nfor arg in "$@"; do\n  if [ "$prev" = "-d" ]; then printf \'%s\\n\' "$arg" >> "$CAPTURE_FILE"; fi\n  prev="$arg"\ndone\n',
   );
   chmodSync(join(bin, "codex"), 0o755);
   chmodSync(join(bin, "curl"), 0o755);
@@ -131,11 +140,46 @@ try {
     },
   });
   assert(result.status === 0, `standalone Codex turn hook failed: ${result.stderr.toString()}`);
+  assert(await waitForFile(capture), "asynchronous Codex user ingest POST did not complete");
   const payloads = readFileSync(capture, "utf8").trim().split("\n").map((line) => JSON.parse(line));
   assert(payloads.length === 1, "standalone Codex turn hook must POST exactly one ingest payload");
   assert(payloads[0].client === "codex", "standalone Codex payload must identify Codex");
   assert(payloads[0].client_type === "cli", "standalone Codex payload must identify the CLI surface");
   assert(payloads[0].content === "hello", "standalone Codex payload must preserve the prompt");
+
+  // Codex Stop must not return before its assistant POST has completed. The
+  // delayed fake curl makes the old fire-and-forget implementation return
+  // before the capture file exists; synchronous delivery leaves the assistant
+  // payload present as soon as the hook exits.
+  const assistantCapture = join(temp, "assistant-payloads.jsonl");
+  const stopResult = spawnSync("bash", [join(PLUGIN, "hooks", "brains-turn.sh")], {
+    input: JSON.stringify({
+      session_id: "codex-session",
+      hook_event_name: "Stop",
+      last_assistant_message: "hello from codex",
+      stop_hook_active: false,
+    }),
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      PLUGIN_ROOT: PLUGIN,
+      BRAINS_API_TOKEN: "",
+      BRAINS_INBOX_TOKEN: "",
+      CLAUDE_PLUGIN_OPTION_TOKEN: "",
+      BRAINS_STATE_DIR: join(temp, "state"),
+      CAPTURE_FILE: assistantCapture,
+      SLOW_CAPTURE: "1",
+    },
+  });
+  assert(stopResult.status === 0, `standalone Codex Stop hook failed: ${stopResult.stderr.toString()}`);
+  const assistantPayloads = readFileSync(assistantCapture, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert(assistantPayloads.length === 1, "Codex Stop must complete exactly one assistant ingest POST");
+  assert(assistantPayloads[0].role === "assistant", "Codex Stop payload must use the assistant role");
+  assert(assistantPayloads[0].client === "codex", "Codex Stop payload must identify Codex");
+  assert(assistantPayloads[0].content === "hello from codex", "Codex Stop payload must preserve the response");
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

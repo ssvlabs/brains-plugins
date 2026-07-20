@@ -17,7 +17,9 @@
 #
 # Ingest is the capture path: every turn POSTs to /ingest/claude, and the server
 # builds the chat_session page. No save_chat_session call needed.
-# Backgrounded curl + max-time so it never slows the harness.
+# Claude keeps the existing fire-and-forget delivery. Codex waits for its
+# assistant POST during Stop so the hook process cannot finish before the
+# response has been handed to the ingest endpoint.
 set -u
 
 # The same hook implementation serves both clients. Codex defines PLUGIN_ROOT;
@@ -60,10 +62,17 @@ ingest() {  # role, content
   local payload
   payload=$(jq -nc --arg s "$SESSION" --arg r "$role" --arg c "$content" --arg client "$CLIENT" \
     '{session_id:$s, role:$r, content:$c, client:$client, client_type:"cli"}')
-  ( curl -s --max-time 5 -X POST "$INGEST" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "$payload" >/dev/null 2>&1 || true ) &
+  if [ "$CLIENT" = "codex" ] && [ "$role" = "assistant" ]; then
+    curl -s --max-time 5 -X POST "$INGEST" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$payload" >/dev/null 2>&1 || true
+  else
+    ( curl -s --max-time 5 -X POST "$INGEST" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$payload" >/dev/null 2>&1 || true ) &
+  fi
 }
 
 if [ -n "$PROMPT" ]; then
