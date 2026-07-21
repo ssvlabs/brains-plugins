@@ -23,9 +23,12 @@ description: How to answer schedule / plan / agenda asks — "what's my day / we
    `list_pages type=calendar_event`**, which filters by ingest time not event
    time. Returns events sorted by start with attendees/location/RSVP parsed.
 2. The latest daily brief — optional context. There is no digest tool; the brief
-   is a board row written by the My Day recipe. `list_boards` → find "Daily
-   digests" → `get_board board_id=<id> dataset=<name>` and take the newest row.
-   Skip silently if the user doesn't have that board.
+   is a board row written by the My Day recipe. `list_boards` → find the board
+   named **"Daily digests"** → `get_board board_id=<id> dataset="daily"` and take
+   the newest row. The dataset name matters: that board also carries `weather`,
+   `important_emails`, `telegram_log` and `unanswered_emails` from the other
+   starter-pack automations, and only `daily` holds the brief. Skip silently if
+   the user doesn't have that board.
 
 If `list_calendar_events` returns 0 for the window, the ingestor may be behind:
 `fetch_from_integration source=calendar request="events from <start> through
