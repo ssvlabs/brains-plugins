@@ -17,10 +17,29 @@
 #
 # Ingest is the capture path: every turn POSTs to /ingest/claude, and the server
 # builds the chat_session page. No save_chat_session call needed.
-# Backgrounded curl + max-time so it never slows the harness.
+# Claude keeps the existing fire-and-forget delivery. Codex waits for its
+# assistant POST during Stop so the hook process cannot finish before the
+# response has been handed to the ingest endpoint.
 set -u
 
+# The same hook implementation serves both clients. Codex defines PLUGIN_ROOT;
+# Claude Code invokes the explicit claude-hooks.json map without it.
+CLIENT="claude"
+[ -n "${PLUGIN_ROOT:-}" ] && CLIENT="codex"
+
 TOKEN="${CLAUDE_PLUGIN_OPTION_TOKEN:-${BRAINS_API_TOKEN:-${BRAINS_INBOX_TOKEN:-}}}"
+# Desktop-launched Codex receives BRAINS_API_TOKEN directly. A standalone
+# Codex CLI can instead have an authenticated MCP transport with a persisted
+# Authorization header, so reuse that same credential for automatic capture.
+# `codex mcp get` is a local config read; its output is never logged.
+if [ -z "$TOKEN" ] && [ "$CLIENT" = "codex" ] && command -v codex >/dev/null 2>&1; then
+  AUTH_HEADER=$(codex mcp get brains --json 2>/dev/null \
+    | jq -r '.transport.http_headers.Authorization // .transport.http_headers.authorization // empty' 2>/dev/null)
+  case "$AUTH_HEADER" in
+    "Bearer "*) TOKEN="${AUTH_HEADER#Bearer }" ;;
+  esac
+  unset AUTH_HEADER
+fi
 [ -z "$TOKEN" ] && exit 0
 BASE="${CLAUDE_PLUGIN_OPTION_ENDPOINT:-${BRAINS_ENDPOINT:-https://mcp.mybrains.ai}}"
 BASE="${BASE%/}"
@@ -41,12 +60,19 @@ ingest() {  # role, content
   local role="$1" content="$2"
   [ -z "$content" ] && return 0
   local payload
-  payload=$(jq -nc --arg s "$SESSION" --arg r "$role" --arg c "$content" \
-    '{session_id:$s, role:$r, content:$c}')
-  ( curl -s --max-time 5 -X POST "$INGEST" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "$payload" >/dev/null 2>&1 || true ) &
+  payload=$(jq -nc --arg s "$SESSION" --arg r "$role" --arg c "$content" --arg client "$CLIENT" \
+    '{session_id:$s, role:$r, content:$c, client:$client, client_type:"cli"}')
+  if [ "$CLIENT" = "codex" ] && [ "$role" = "assistant" ]; then
+    curl -s --max-time 5 -X POST "$INGEST" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$payload" >/dev/null 2>&1 || true
+  else
+    ( curl -s --max-time 5 -X POST "$INGEST" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$payload" >/dev/null 2>&1 || true ) &
+  fi
 }
 
 if [ -n "$PROMPT" ]; then

@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..", "..");
@@ -14,6 +16,15 @@ function readJson(path: string): any {
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new AssertionError(message);
+}
+
+async function waitForFile(path: string, timeoutMs = 1_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) return true;
+    await Bun.sleep(10);
+  }
+  return existsSync(path);
 }
 
 function hookScripts(config: any): string[] {
@@ -30,6 +41,7 @@ const codexMarketplace = readJson(join(ROOT, ".agents", "plugins", "marketplace.
 const claudeHooks = readJson(join(PLUGIN, "hooks", "claude-hooks.json"));
 const codexHooks = readJson(join(PLUGIN, "hooks", "hooks.json"));
 const codexMcp = readJson(join(PLUGIN, ".mcp.json"));
+const turnHook = readFileSync(join(PLUGIN, "hooks", "brains-turn.sh"), "utf8");
 
 assert(claudeManifest.name === "brains", "Claude manifest name must be brains");
 assert(codexManifest.name === "brains", "Codex manifest name must be brains");
@@ -73,5 +85,103 @@ for (const command of hookScripts(codexHooks)) {
 assert(codexMcp.mcpServers?.brains?.type === "http", "Codex brains MCP must be HTTP");
 assert(codexMcp.mcpServers?.brains?.url === "https://mcp.mybrains.ai/mcp", "Codex brains MCP URL mismatch");
 assert(codexMcp.mcpServers?.brains?.bearer_token_env_var === "BRAINS_API_TOKEN", "Codex token env mismatch");
+
+assert(
+  turnHook.includes('CLIENT="claude"'),
+  "shared turn hook must default Claude Code captures to the Claude CLI",
+);
+assert(
+  turnHook.includes('[ -n "${PLUGIN_ROOT:-}" ] && CLIENT="codex"'),
+  "shared turn hook must identify the Codex plugin runtime as the Codex CLI",
+);
+assert(
+  turnHook.includes('client:$client, client_type:"cli"'),
+  "turn ingest payload must include the detected client and CLI type",
+);
+assert(
+  turnHook.includes("codex mcp get brains --json"),
+  "Codex turn capture must reuse persisted MCP authentication when no token env is present",
+);
+assert(
+  turnHook.includes(".transport.http_headers.Authorization"),
+  "Codex turn capture must read the configured MCP Authorization header",
+);
+
+// Exercise the standalone Codex path without a token env. The fake `codex`
+// exposes the same persisted Authorization shape as `codex mcp get`, while the
+// fake `curl` captures only POST bodies (the inbox GET remains a no-op).
+const temp = mkdtempSync(join(tmpdir(), "brains-plugin-contract-"));
+try {
+  const bin = join(temp, "bin");
+  const capture = join(temp, "payloads.jsonl");
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, "codex"),
+    '#!/bin/sh\nprintf \'%s\\n\' \'{"transport":{"http_headers":{"Authorization":"Bearer configured-token"}}}\'\n',
+  );
+  writeFileSync(
+    join(bin, "curl"),
+    '#!/bin/sh\n[ "${SLOW_CAPTURE:-}" = "1" ] && sleep 0.2\nprev=""\nfor arg in "$@"; do\n  if [ "$prev" = "-d" ]; then printf \'%s\\n\' "$arg" >> "$CAPTURE_FILE"; fi\n  prev="$arg"\ndone\n',
+  );
+  chmodSync(join(bin, "codex"), 0o755);
+  chmodSync(join(bin, "curl"), 0o755);
+
+  const result = spawnSync("bash", [join(PLUGIN, "hooks", "brains-turn.sh")], {
+    input: JSON.stringify({ session_id: "codex-session", prompt: "hello" }),
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      PLUGIN_ROOT: PLUGIN,
+      BRAINS_API_TOKEN: "",
+      BRAINS_INBOX_TOKEN: "",
+      CLAUDE_PLUGIN_OPTION_TOKEN: "",
+      BRAINS_STATE_DIR: join(temp, "state"),
+      CAPTURE_FILE: capture,
+    },
+  });
+  assert(result.status === 0, `standalone Codex turn hook failed: ${result.stderr.toString()}`);
+  assert(await waitForFile(capture), "asynchronous Codex user ingest POST did not complete");
+  const payloads = readFileSync(capture, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert(payloads.length === 1, "standalone Codex turn hook must POST exactly one ingest payload");
+  assert(payloads[0].client === "codex", "standalone Codex payload must identify Codex");
+  assert(payloads[0].client_type === "cli", "standalone Codex payload must identify the CLI surface");
+  assert(payloads[0].content === "hello", "standalone Codex payload must preserve the prompt");
+
+  // Codex Stop must not return before its assistant POST has completed. The
+  // delayed fake curl makes the old fire-and-forget implementation return
+  // before the capture file exists; synchronous delivery leaves the assistant
+  // payload present as soon as the hook exits.
+  const assistantCapture = join(temp, "assistant-payloads.jsonl");
+  const stopResult = spawnSync("bash", [join(PLUGIN, "hooks", "brains-turn.sh")], {
+    input: JSON.stringify({
+      session_id: "codex-session",
+      hook_event_name: "Stop",
+      last_assistant_message: "hello from codex",
+      stop_hook_active: false,
+    }),
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      PLUGIN_ROOT: PLUGIN,
+      BRAINS_API_TOKEN: "",
+      BRAINS_INBOX_TOKEN: "",
+      CLAUDE_PLUGIN_OPTION_TOKEN: "",
+      BRAINS_STATE_DIR: join(temp, "state"),
+      CAPTURE_FILE: assistantCapture,
+      SLOW_CAPTURE: "1",
+    },
+  });
+  assert(stopResult.status === 0, `standalone Codex Stop hook failed: ${stopResult.stderr.toString()}`);
+  const assistantPayloads = readFileSync(assistantCapture, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert(assistantPayloads.length === 1, "Codex Stop must complete exactly one assistant ingest POST");
+  assert(assistantPayloads[0].role === "assistant", "Codex Stop payload must use the assistant role");
+  assert(assistantPayloads[0].client === "codex", "Codex Stop payload must identify Codex");
+  assert(assistantPayloads[0].content === "hello from codex", "Codex Stop payload must preserve the response");
+} finally {
+  rmSync(temp, { recursive: true, force: true });
+}
 
 console.log("plugin contract: PASS");
