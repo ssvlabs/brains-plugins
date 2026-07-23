@@ -15,7 +15,7 @@ tools carry it.
 | **Board** | Spreadsheet-like dataset on a brain; rows are JSON, shared & queryable | "track a list of…", "keep a table/CRM/pipeline of…", "log every X" | `create_board_flow` |
 | **Board skill** | Named saved LLM action over a board's rows | "every row, do X", "summarize/score/enrich each row", repeated lookup | `create_board_skill` |
 | **Automation** (feed board) | An automation that fetches from email/cal/drive on a cron and appends rows | "run this nightly and feed a board", "keep this list fresh from email/cal/drive" | `create_automation_flow` |
-| **Dashboard** | Live HTML view over a board (stats / charts / table / kanban / tabs …) | "make me a dashboard", "show this as cards/kanban/chart", "change the dashboard" | `get_dashboard` → follow the returned `skill` → `set_dashboard` (`engine_version: "v2"`) |
+| **Dashboard** | A live, interactive view of a board — you design and author it as a full HTML app | "make me a dashboard", "show this as cards/kanban/chart", "build me this app on my board", "change the dashboard" | `get_dashboard` → **follow the `skill` it returns** → `set_dashboard` |
 | **Page** | First-class note in a brain | "save this as a note", "keep this writeup findable" | `create_page` |
 | **Automation** | Sandboxed TS program on a cron schedule with a scoped token | "every morning do X", "auto-draft Y when Z", anything re-prompted on a timer | `create_automation_flow` |
 | **Workflow** | Goal container: charter + KPIs + deadlines + roster + owned board + paused template automations; one status flip pauses/un-pauses all | "ship X by Q3", "coordinate this initiative with a team & deadline" | `create_workflow_flow` |
