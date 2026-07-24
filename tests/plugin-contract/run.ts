@@ -42,10 +42,15 @@ const claudeHooks = readJson(join(PLUGIN, "hooks", "claude-hooks.json"));
 const codexHooks = readJson(join(PLUGIN, "hooks", "hooks.json"));
 const codexMcp = readJson(join(PLUGIN, ".mcp.json"));
 const turnHook = readFileSync(join(PLUGIN, "hooks", "brains-turn.sh"), "utf8");
+const core = readFileSync(join(PLUGIN, "core.md"), "utf8");
+const writeSkill = readFileSync(join(PLUGIN, "skills", "brains-write", "SKILL.md"), "utf8");
+const coreNormalized = core.replace(/\s+/g, " ");
+const writeSkillNormalized = writeSkill.replace(/\s+/g, " ");
 
 assert(claudeManifest.name === "brains", "Claude manifest name must be brains");
 assert(codexManifest.name === "brains", "Codex manifest name must be brains");
 assert(claudeManifest.version === codexManifest.version, "client manifests must stay version-aligned");
+assert(claudeManifest.version === "2.3.2", "CORE-007 plugin release must be version 2.3.2");
 assert(claudeManifest.hooks === "./hooks/claude-hooks.json", "Claude must select its event map explicitly");
 assert(codexManifest.skills === "./skills/", "Codex must use the shared skills directory");
 assert(codexManifest.mcpServers === "./.mcp.json", "Codex must load its MCP declaration");
@@ -85,6 +90,28 @@ for (const command of hookScripts(codexHooks)) {
 assert(codexMcp.mcpServers?.brains?.type === "http", "Codex brains MCP must be HTTP");
 assert(codexMcp.mcpServers?.brains?.url === "https://mcp.mybrains.ai/mcp", "Codex brains MCP URL mismatch");
 assert(codexMcp.mcpServers?.brains?.bearer_token_env_var === "BRAINS_API_TOKEN", "Codex token env mismatch");
+
+assert(core.includes("<!-- brains:core:start v=5 -->"), "CORE-007 core marker must be v5");
+for (const signal of [
+  "Query brains reflexively",
+  "list_calendar_events",
+  "calendar page update time is not event time",
+  "`search` for exact terms",
+  "`query` for conceptual requests",
+  "`get_page` only after",
+  "fetch_from_integration",
+  "report a plain miss",
+  "never invent slugs or IDs",
+  "The skills carry the detail",
+]) {
+  assert(coreNormalized.includes(signal), `compact core is missing routing/delegation signal: ${signal}`);
+}
+assert(core.length < 3_000, "always-loaded core must stay below 3,000 characters");
+
+assert(writeSkillNormalized.includes("install_id=<…> action_name=<…> input={…}"), "structured action tuple missing");
+assert(writeSkillNormalized.includes("The out-of-band surfaces hold the confirmation capability"), "approval boundary missing");
+assert(writeSkillNormalized.includes("Do **not** call `confirm_action`"), "agent self-confirm prohibition missing");
+assert(!/act_on_integration[^\n]+request=/.test(writeSkill), "free-form action request must not return");
 
 assert(
   turnHook.includes('CLIENT="claude"'),

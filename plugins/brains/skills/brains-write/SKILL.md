@@ -16,7 +16,7 @@ action matches.
    `install_id`, `action_name`, `description`, `input_schema`,
    `requires_confirmation`, and `examples` (strong hints for shaping `input`).
 2. **Dispatch** — `act_on_integration install_id=<…> action_name=<…> input={…}`
-   (input matches `input_schema`; NO `source`/`request` — those are legacy).
+   (input matches `input_schema`; do not send a free-form `request`).
    Build `input` yourself from the user's words; if the ask is fuzzy, the
    discovery `query` + the action's `examples` tell you which action and shape.
 
@@ -27,14 +27,13 @@ action matches.
   it. Read-only / reversible actions live here (gmail `query_emails`,
   `mark_read`, `add_labels`; monday `add_comment`; …).
 - **`requires_confirmation: true` (or undefined = default)** → returns
-  `{kind:"draft", draft_id, preview, expires_at}`. **Show the `preview`, get
-  explicit user consent, then `confirm_action draft_id=<…>`.** Destructive sends
-  (email, calendar invite, doc create) live here. Drafts expire in 1 hour.
+  `{kind:"draft", draft_id, preview, confirm_hint, expires_at}`. Relay the
+  `preview` and `confirm_hint`, then stop. The user confirms or discards through
+  the real controls in `/inbox` (web/mobile) or Telegram. Do **not** call
+  `confirm_action` from this agent loop. Destructive sends (email, calendar
+  invite, doc create) live here. Drafts expire in 1 hour.
 
-`confirm_action` is one-shot and idempotent across surfaces (MCP / web / Telegram)
-— a second call returns the existing result instead of re-firing. `edits={…}`
-on confirm patches whitelisted fields (email: to/cc/bcc/subject/body; event:
-summary/description/location/start/end/attendees/send_updates; file: name/content).
+The out-of-band surfaces hold the confirmation capability; this chat does not.
 
 ### Live Gmail search
 
@@ -43,11 +42,11 @@ Gmail search at runtime for mail the ingested pages don't cover. `input={query:
 "<gmail syntax>", limit: 1..50}`. Reach for it AFTER `list_pages`/`search` come
 up short, not before.
 
-## Legacy fallback (one line)
+## Legacy structured fallback
 
-If no `integration_action` matches: `act_on_integration source=<gmail|calendar|drive> request="<NL>"` → returns `{kind:"draft"|"clarification"|"noop"}`.
-Same draft→`confirm_action`/`discard_action` gate. (Being deprecated as
-integrations migrate to codex.)
+If discovery returns a legacy source-bound action, dispatch the same structured
+`action_name` + `input` with its `source` instead of `install_id`. Never replace
+the tuple with a free-form `request`.
 
 ## Routing a generic "message someone"
 
@@ -58,4 +57,5 @@ messaging integration the user actually has connected. Use `gmail` only when the
 say "email," give an email address, or are replying to/forwarding a thread.
 `calendar`/`drive` only when explicit.
 
-**Always show the preview and get a yes before confirming a destructive action.**
+**Always relay a destructive action's preview and confirmation hint, then leave
+the decision to the user's out-of-band approval surface.**
