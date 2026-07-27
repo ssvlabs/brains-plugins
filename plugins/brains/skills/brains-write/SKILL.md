@@ -6,8 +6,8 @@ description: How to take ACTIONS on the user's integrations through brains — s
 # Acting on integrations (writes)
 
 Codex-first. Each connected integration declares its own actions; discover and
-dispatch them generically. Fall back to the legacy source-enum only when no codex
-action matches.
+dispatch them generically. If nothing matches, refine the discovery query or say
+no installed action covers it; there is no source-enum fallback.
 
 ## The codex path (preferred)
 
@@ -31,7 +31,11 @@ action matches.
   write reached the provider is **unknown**. Never blind-retry: read the state
   back (or send the user to `/inbox`) before re-sending. A pure read is safe to
   retry.
-- **`requires_confirmation: true` (or undefined = default)** → returns
+- **`requires_confirmation` absent from the frontmatter** → the page predates
+  the field, so the outcome cannot be predicted. Never assume it will draft:
+  dispatch the full tuple, branch on the returned `kind`, and report
+  `auto_executed` in the past tense.
+- **`requires_confirmation: true`** → returns
   `{kind:"draft", draft_id, action, preview, payload, confirm_hint, expires_at}`.
   Relay the `preview` and `confirm_hint`, then stop. The user confirms through
   the real controls in `/inbox` (web/mobile) or Telegram. Do **not** call

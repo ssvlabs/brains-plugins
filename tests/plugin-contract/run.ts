@@ -111,8 +111,24 @@ for (const signal of [
 }
 assert(core.length < 3_000, "always-loaded core must stay below 3,000 characters");
 
+// This public plugin is a sixth model-visible copy of the act contract, outside
+// the monorepo's ACT_CONTRACT_COPIES gate. Mirror its four load-bearing rules
+// here so a future compaction cannot drift independently again.
 assert(writeSkillNormalized.includes("install_id=<…> action_name=<…> input={…}"), "structured action tuple missing");
 assert(writeSkillNormalized.includes("call `get_page` on the selected result"), "action discovery must resolve frontmatter");
+assert(
+  writeSkillNormalized.includes("`requires_confirmation` absent from the frontmatter") &&
+    writeSkillNormalized.includes("the outcome cannot be predicted") &&
+    writeSkillNormalized.includes("Never assume it will draft"),
+  "absent requires_confirmation must remain unknown rather than predict a draft",
+);
+assert(
+  writeSkillNormalized.includes('**`requires_confirmation: false`** → executes inline now, returns') &&
+    writeSkillNormalized.includes('{kind:"auto_executed", result, action_record_id}'),
+  "requires_confirmation:false must be documented as already executed",
+);
+assert(writeSkillNormalized.includes("there is no source-enum fallback"), "legacy source-enum fallback must stay removed");
+assert(!writeSkillNormalized.includes("Fall back to the legacy source-enum"), "stale legacy fallback pointer must not return");
 assert(writeSkillNormalized.includes("action_record_id"), "auto-executed result must expose action_record_id");
 assert(!writeSkillNormalized.includes("audit_id"), "stale auto-executed audit_id field must not return");
 assert(
