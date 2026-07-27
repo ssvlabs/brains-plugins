@@ -12,8 +12,8 @@ action matches.
 ## The codex path (preferred)
 
 1. **Discover** — `query type=integration_action text="<natural-language intent>"`.
-   Returns ranked `integration_action` pages. Each carries, in frontmatter:
-   `install_id`, `action_name`, `description`, `input_schema`,
+   It returns ranked page slugs; call `get_page` on the selected result to read
+   its frontmatter: `install_id`, `action_name`, `description`, `input_schema`,
    `requires_confirmation`, and `examples` (strong hints for shaping `input`).
 2. **Dispatch** — `act_on_integration install_id=<…> action_name=<…> input={…}`
    (input matches `input_schema`; do not send a free-form `request`).
@@ -23,11 +23,14 @@ action matches.
 ### Return kinds — know which is the success state
 
 - **`requires_confirmation: false`** → executes inline now, returns
-  `{kind:"auto_executed", result, audit_id}`. **Done** — do NOT try to confirm
-  it. Read-only / reversible actions live here (gmail `query_emails`,
-  `mark_read`, `add_labels`; monday `add_comment`; …).
-- **`kind:"auto_failed"` / `kind:"rate_limited"`** → relay the error or
-  `retry_after_seconds` plainly. Do not silently retry or imply success.
+  `{kind:"auto_executed", result, action_record_id}`. **Done** — do NOT try to
+  confirm it, and do not assume it was read-only.
+- **`kind:"rate_limited"`** → nothing ran and no upstream call was made. Retry
+  after `retry_after_seconds`.
+- **`kind:"auto_failed"`** → the action was attempted, so whether an outbound
+  write reached the provider is **unknown**. Never blind-retry: read the state
+  back (or send the user to `/inbox`) before re-sending. A pure read is safe to
+  retry.
 - **`requires_confirmation: true` (or undefined = default)** → returns
   `{kind:"draft", draft_id, action, preview, payload, confirm_hint, expires_at}`.
   Relay the `preview` and `confirm_hint`, then stop. The user confirms through
@@ -35,7 +38,8 @@ action matches.
   `confirm_action` from this agent loop. If the user cancels or corrects the
   draft, call `discard_action`; for a correction, draft the structured action
   again with the new input. Destructive sends (email, calendar invite, doc
-  create) live here. Drafts expire in 1 hour.
+  create) live here. After 1 hour a draft moves to the `/inbox` Expired tab but
+  remains approvable, so discard the old draft before redrafting.
 
 The out-of-band surfaces hold the confirmation capability; this chat does not.
 
@@ -46,11 +50,11 @@ Gmail search at runtime for mail the ingested pages don't cover. `input={query:
 "<gmail syntax>", limit: 1..50}`. Reach for it AFTER `list_pages`/`search` come
 up short, not before.
 
-## Legacy structured fallback
+## Gmail / Calendar / Drive
 
-If discovery returns a legacy source-bound action, dispatch the same structured
-`action_name` + `input` with its `source` instead of `install_id`. Never replace
-the tuple with a free-form `request`.
+These are codex installs like any other. `query type=integration_action` finds
+their action pages; `get_page` reveals the `install_id`. Dispatch the same
+`install_id` + `action_name` + `input` tuple. A bare `source` drafts nothing.
 
 ## Routing a generic "message someone"
 

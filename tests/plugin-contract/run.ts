@@ -112,9 +112,24 @@ for (const signal of [
 assert(core.length < 3_000, "always-loaded core must stay below 3,000 characters");
 
 assert(writeSkillNormalized.includes("install_id=<…> action_name=<…> input={…}"), "structured action tuple missing");
+assert(writeSkillNormalized.includes("call `get_page` on the selected result"), "action discovery must resolve frontmatter");
+assert(writeSkillNormalized.includes("action_record_id"), "auto-executed result must expose action_record_id");
+assert(!writeSkillNormalized.includes("audit_id"), "stale auto-executed audit_id field must not return");
+assert(
+  writeSkillNormalized.includes('**`kind:"rate_limited"`** → nothing ran and no upstream call was made'),
+  "rate-limited actions must be documented as not attempted",
+);
+assert(
+  writeSkillNormalized.includes("whether an outbound write reached the provider is **unknown**"),
+  "auto-failed actions must preserve unknown-outcome guidance",
+);
+assert(writeSkillNormalized.includes("Never blind-retry"), "auto-failed external writes must not be blindly retried");
 assert(writeSkillNormalized.includes("The out-of-band surfaces hold the confirmation capability"), "approval boundary missing");
 assert(writeSkillNormalized.includes("Do **not** call `confirm_action`"), "agent self-confirm prohibition missing");
 assert(writeSkillNormalized.includes("call `discard_action`"), "agent-side draft discard path missing");
+assert(!writeSkillNormalized.includes("never call `discard_action`"), "draft discard guidance must remain actionable");
+assert(writeSkillNormalized.includes("remains approvable"), "expired drafts must not be described as inert");
+assert(writeSkillNormalized.includes("A bare `source` drafts nothing"), "source-only action fallback must stay prohibited");
 assert(!/act_on_integration[^.]{0,200}request=/.test(writeSkillNormalized), "free-form action request must not return");
 
 assert(
