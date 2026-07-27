@@ -20,18 +20,22 @@ action matches.
    Build `input` yourself from the user's words; if the ask is fuzzy, the
    discovery `query` + the action's `examples` tell you which action and shape.
 
-### Two return kinds — know which is the success state
+### Return kinds — know which is the success state
 
 - **`requires_confirmation: false`** → executes inline now, returns
   `{kind:"auto_executed", result, audit_id}`. **Done** — do NOT try to confirm
   it. Read-only / reversible actions live here (gmail `query_emails`,
   `mark_read`, `add_labels`; monday `add_comment`; …).
+- **`kind:"auto_failed"` / `kind:"rate_limited"`** → relay the error or
+  `retry_after_seconds` plainly. Do not silently retry or imply success.
 - **`requires_confirmation: true` (or undefined = default)** → returns
-  `{kind:"draft", draft_id, preview, confirm_hint, expires_at}`. Relay the
-  `preview` and `confirm_hint`, then stop. The user confirms or discards through
+  `{kind:"draft", draft_id, action, preview, payload, confirm_hint, expires_at}`.
+  Relay the `preview` and `confirm_hint`, then stop. The user confirms through
   the real controls in `/inbox` (web/mobile) or Telegram. Do **not** call
-  `confirm_action` from this agent loop. Destructive sends (email, calendar
-  invite, doc create) live here. Drafts expire in 1 hour.
+  `confirm_action` from this agent loop. If the user cancels or corrects the
+  draft, call `discard_action`; for a correction, draft the structured action
+  again with the new input. Destructive sends (email, calendar invite, doc
+  create) live here. Drafts expire in 1 hour.
 
 The out-of-band surfaces hold the confirmation capability; this chat does not.
 

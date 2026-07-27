@@ -50,7 +50,6 @@ const writeSkillNormalized = writeSkill.replace(/\s+/g, " ");
 assert(claudeManifest.name === "brains", "Claude manifest name must be brains");
 assert(codexManifest.name === "brains", "Codex manifest name must be brains");
 assert(claudeManifest.version === codexManifest.version, "client manifests must stay version-aligned");
-assert(claudeManifest.version === "2.3.2", "CORE-007 plugin release must be version 2.3.2");
 assert(claudeManifest.hooks === "./hooks/claude-hooks.json", "Claude must select its event map explicitly");
 assert(codexManifest.skills === "./skills/", "Codex must use the shared skills directory");
 assert(codexManifest.mcpServers === "./.mcp.json", "Codex must load its MCP declaration");
@@ -91,7 +90,7 @@ assert(codexMcp.mcpServers?.brains?.type === "http", "Codex brains MCP must be H
 assert(codexMcp.mcpServers?.brains?.url === "https://mcp.mybrains.ai/mcp", "Codex brains MCP URL mismatch");
 assert(codexMcp.mcpServers?.brains?.bearer_token_env_var === "BRAINS_API_TOKEN", "Codex token env mismatch");
 
-assert(core.includes("<!-- brains:core:start v=5 -->"), "CORE-007 core marker must be v5");
+assert(core.includes("<!-- brains:core:start v=5 -->"), "core marker must be v5");
 for (const signal of [
   "Query brains reflexively",
   "list_calendar_events",
@@ -101,8 +100,12 @@ for (const signal of [
   "`get_page` only after",
   "fetch_from_integration",
   "report a plain miss",
+  "Chain dependent reads; don't fan them out",
   "never invent slugs or IDs",
   "The skills carry the detail",
+  "note the error and what you were doing",
+  "Do not attach it to unrelated later feedback",
+  "Once per session, when natural, mention `brains-feedback`",
 ]) {
   assert(coreNormalized.includes(signal), `compact core is missing routing/delegation signal: ${signal}`);
 }
@@ -111,7 +114,8 @@ assert(core.length < 3_000, "always-loaded core must stay below 3,000 characters
 assert(writeSkillNormalized.includes("install_id=<…> action_name=<…> input={…}"), "structured action tuple missing");
 assert(writeSkillNormalized.includes("The out-of-band surfaces hold the confirmation capability"), "approval boundary missing");
 assert(writeSkillNormalized.includes("Do **not** call `confirm_action`"), "agent self-confirm prohibition missing");
-assert(!/act_on_integration[^\n]+request=/.test(writeSkill), "free-form action request must not return");
+assert(writeSkillNormalized.includes("call `discard_action`"), "agent-side draft discard path missing");
+assert(!/act_on_integration[^.]{0,200}request=/.test(writeSkillNormalized), "free-form action request must not return");
 
 assert(
   turnHook.includes('CLIENT="claude"'),
