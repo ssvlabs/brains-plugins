@@ -257,11 +257,18 @@ assert(!/act_on_integration[^.]{0,200}request=/.test(writeSkillNormalized), "fre
 // This README is the install instructions for anyone who finds the repo directly rather than the
 // guided page, so it has to carry the same contract. It documented `export BRAINS_API_TOKEN` as the
 // way in long after that stopped being able to work, which is exactly the drift these pin.
-const codexReadme = readme.slice(
-  readme.indexOf("## Install for Codex"),
-  readme.indexOf("## Install for Claude Code"),
+// Resolve both delimiters before slicing. A missing end heading yields -1, and
+// `slice(start, -1)` would silently widen the region to almost the whole file —
+// every assertion below would then pass while reading the wrong section.
+const codexStart = readme.indexOf("## Install for Codex");
+const claudeStart = readme.indexOf("## Install for Claude Code");
+assert(codexStart >= 0, "README must document a Codex install");
+assert(claudeStart >= 0, "README must document a Claude Code install");
+assert(
+  claudeStart > codexStart,
+  "README's Claude Code section must follow the Codex one — the Codex checks below slice between them",
 );
-assert(codexReadme.length > 0, "README must document a Codex install");
+const codexReadme = readme.slice(codexStart, claudeStart);
 assert(
   codexReadme.includes("codex mcp login brains"),
   "README's Codex install must sign Codex in with `codex mcp login brains`",
