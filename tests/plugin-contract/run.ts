@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -44,6 +45,7 @@ const codexMcp = readJson(join(PLUGIN, ".mcp.json"));
 const turnHook = readFileSync(join(PLUGIN, "hooks", "brains-turn.sh"), "utf8");
 const core = readFileSync(join(PLUGIN, "core.md"), "utf8");
 const writeSkill = readFileSync(join(PLUGIN, "skills", "brains-write", "SKILL.md"), "utf8");
+const capabilityManifest = readJson(join(PLUGIN, "generated", "capability-catalog.json"));
 const coreNormalized = core.replace(/\s+/g, " ");
 const writeSkillNormalized = writeSkill.replace(/\s+/g, " ");
 
@@ -111,9 +113,28 @@ for (const signal of [
 }
 assert(core.length < 3_000, "always-loaded core must stay below 3,000 characters");
 
-// This public plugin is a sixth model-visible copy of the act contract, outside
-// the monorepo's ACT_CONTRACT_COPIES gate. Mirror its four load-bearing rules
-// here so a future compaction cannot drift independently again.
+// The public face is generated from the monorepo capability catalog. Verify its
+// immutable artifact digest locally; installation never fetches a mutable copy.
+assert(capabilityManifest.schema_version === 1, "capability manifest schema mismatch");
+assert(capabilityManifest.catalog_schema_version === 1, "catalog schema mismatch");
+assert(capabilityManifest.renderer_version === 1, "catalog renderer mismatch");
+assert(capabilityManifest.capability_id === "integration-actions", "capability id mismatch");
+assert(
+  capabilityManifest.artifact_path === "plugins/brains/skills/brains-write/SKILL.md",
+  "generated artifact path mismatch",
+);
+assert(
+  capabilityManifest.artifact_sha256 ===
+    createHash("sha256").update(writeSkill, "utf8").digest("hex"),
+  "generated brains-write artifact digest mismatch",
+);
+assert(
+  !/automation_secret|adminPool|handler_source|telegram_push|grant_token/.test(writeSkill),
+  "public skill leaked an internal-only capability",
+);
+
+// Keep independent semantic assertions: digest equality proves provenance, not
+// that the canonical source itself kept the load-bearing safety rules.
 assert(writeSkillNormalized.includes("install_id=<…> action_name=<…> input={…}"), "structured action tuple missing");
 assert(writeSkillNormalized.includes("call `get_page` on the selected result"), "action discovery must resolve frontmatter");
 assert(
@@ -135,6 +156,8 @@ assert(
   writeSkillNormalized.includes('**`kind:"rate_limited"`** → nothing ran and no upstream call was made'),
   "rate-limited actions must be documented as not attempted",
 );
+assert(writeSkillNormalized.includes('**`kind:"clarification"`**'), "clarification result kind missing");
+assert(writeSkillNormalized.includes('**`kind:"noop"`**'), "noop result kind missing");
 assert(
   writeSkillNormalized.includes("whether an outbound write reached the provider is **unknown**"),
   "auto-failed actions must preserve unknown-outcome guidance",

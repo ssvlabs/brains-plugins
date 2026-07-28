@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "catalog_schema_version": 1,
+  "renderer_version": 1,
+  "capability_id": "integration-actions",
+  "source_repository": "https://github.com/ssvlabs/brains",
+  "source_generator": "apps/mcp/scripts/generate-capability-catalog.ts",
+  "catalog_sha256": "9f9f9fbbfb57db0578f4759759ceb41028f36f98d94415a90a6ef432e8d56efc",
+  "artifact_path": "plugins/brains/skills/brains-write/SKILL.md",
+  "artifact_sha256": "b0401fca02774f55d324b902ba64070fd1d753b8679d7e45c40c2ce57ef301d8"
+}
