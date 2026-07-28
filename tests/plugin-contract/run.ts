@@ -42,6 +42,10 @@ const claudeHooks = readJson(join(PLUGIN, "hooks", "claude-hooks.json"));
 const codexHooks = readJson(join(PLUGIN, "hooks", "hooks.json"));
 const codexMcp = readJson(join(PLUGIN, ".mcp.json"));
 const turnHook = readFileSync(join(PLUGIN, "hooks", "brains-turn.sh"), "utf8");
+const core = readFileSync(join(PLUGIN, "core.md"), "utf8");
+const writeSkill = readFileSync(join(PLUGIN, "skills", "brains-write", "SKILL.md"), "utf8");
+const coreNormalized = core.replace(/\s+/g, " ");
+const writeSkillNormalized = writeSkill.replace(/\s+/g, " ");
 
 assert(claudeManifest.name === "brains", "Claude manifest name must be brains");
 assert(codexManifest.name === "brains", "Codex manifest name must be brains");
@@ -85,6 +89,64 @@ for (const command of hookScripts(codexHooks)) {
 assert(codexMcp.mcpServers?.brains?.type === "http", "Codex brains MCP must be HTTP");
 assert(codexMcp.mcpServers?.brains?.url === "https://mcp.mybrains.ai/mcp", "Codex brains MCP URL mismatch");
 assert(codexMcp.mcpServers?.brains?.bearer_token_env_var === "BRAINS_API_TOKEN", "Codex token env mismatch");
+
+assert(core.includes("<!-- brains:core:start v=5 -->"), "core marker must be v5");
+for (const signal of [
+  "Query brains reflexively",
+  "list_calendar_events",
+  "calendar page update time is not event time",
+  "`search` for exact terms",
+  "`query` for conceptual requests",
+  "`get_page` only after",
+  "fetch_from_integration",
+  "report a plain miss",
+  "Chain dependent reads; don't fan them out",
+  "never invent slugs or IDs",
+  "The skills carry the detail",
+  "note the error and what you were doing",
+  "Do not attach it to unrelated later feedback",
+  "Once per session, when natural, mention `brains-feedback`",
+]) {
+  assert(coreNormalized.includes(signal), `compact core is missing routing/delegation signal: ${signal}`);
+}
+assert(core.length < 3_000, "always-loaded core must stay below 3,000 characters");
+
+// This public plugin is a sixth model-visible copy of the act contract, outside
+// the monorepo's ACT_CONTRACT_COPIES gate. Mirror its four load-bearing rules
+// here so a future compaction cannot drift independently again.
+assert(writeSkillNormalized.includes("install_id=<…> action_name=<…> input={…}"), "structured action tuple missing");
+assert(writeSkillNormalized.includes("call `get_page` on the selected result"), "action discovery must resolve frontmatter");
+assert(
+  writeSkillNormalized.includes("`requires_confirmation` absent from the frontmatter") &&
+    writeSkillNormalized.includes("the outcome cannot be predicted") &&
+    writeSkillNormalized.includes("Never assume it will draft"),
+  "absent requires_confirmation must remain unknown rather than predict a draft",
+);
+assert(
+  writeSkillNormalized.includes('**`requires_confirmation: false`** → executes inline now, returns') &&
+    writeSkillNormalized.includes('{kind:"auto_executed", result, action_record_id}'),
+  "requires_confirmation:false must be documented as already executed",
+);
+assert(writeSkillNormalized.includes("there is no source-enum fallback"), "legacy source-enum fallback must stay removed");
+assert(!writeSkillNormalized.includes("Fall back to the legacy source-enum"), "stale legacy fallback pointer must not return");
+assert(writeSkillNormalized.includes("action_record_id"), "auto-executed result must expose action_record_id");
+assert(!writeSkillNormalized.includes("audit_id"), "stale auto-executed audit_id field must not return");
+assert(
+  writeSkillNormalized.includes('**`kind:"rate_limited"`** → nothing ran and no upstream call was made'),
+  "rate-limited actions must be documented as not attempted",
+);
+assert(
+  writeSkillNormalized.includes("whether an outbound write reached the provider is **unknown**"),
+  "auto-failed actions must preserve unknown-outcome guidance",
+);
+assert(writeSkillNormalized.includes("Never blind-retry"), "auto-failed external writes must not be blindly retried");
+assert(writeSkillNormalized.includes("The out-of-band surfaces hold the confirmation capability"), "approval boundary missing");
+assert(writeSkillNormalized.includes("Do **not** call `confirm_action`"), "agent self-confirm prohibition missing");
+assert(writeSkillNormalized.includes("call `discard_action`"), "agent-side draft discard path missing");
+assert(!writeSkillNormalized.includes("never call `discard_action`"), "draft discard guidance must remain actionable");
+assert(writeSkillNormalized.includes("remains approvable"), "expired drafts must not be described as inert");
+assert(writeSkillNormalized.includes("A bare `source` drafts nothing"), "source-only action fallback must stay prohibited");
+assert(!/act_on_integration[^.]{0,200}request=/.test(writeSkillNormalized), "free-form action request must not return");
 
 assert(
   turnHook.includes('CLIENT="claude"'),

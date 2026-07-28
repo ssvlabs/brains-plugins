@@ -6,48 +6,61 @@ description: How to take ACTIONS on the user's integrations through brains — s
 # Acting on integrations (writes)
 
 Codex-first. Each connected integration declares its own actions; discover and
-dispatch them generically. Fall back to the legacy source-enum only when no codex
-action matches.
+dispatch them generically. If nothing matches, refine the discovery query or say
+no installed action covers it; there is no source-enum fallback.
 
 ## The codex path (preferred)
 
 1. **Discover** — `query type=integration_action text="<natural-language intent>"`.
-   Returns ranked `integration_action` pages. Each carries, in frontmatter:
-   `install_id`, `action_name`, `description`, `input_schema`,
-   `requires_confirmation`, and `examples` (strong hints for shaping `input`).
+   It returns ranked page slugs; call `get_page` on the selected result to read
+   its frontmatter: `install_id`, `action_name`, `description`, `input_schema`,
+   `requires_confirmation`, and `side_effect`. The page body carries example
+   requests — strong hints for shaping `input`.
 2. **Dispatch** — `act_on_integration install_id=<…> action_name=<…> input={…}`
-   (input matches `input_schema`; NO `source`/`request` — those are legacy).
+   (input matches `input_schema`; do not send a free-form `request`).
    Build `input` yourself from the user's words; if the ask is fuzzy, the
    discovery `query` + the action's `examples` tell you which action and shape.
 
-### Two return kinds — know which is the success state
+### Return kinds — know which is the success state
 
 - **`requires_confirmation: false`** → executes inline now, returns
-  `{kind:"auto_executed", result, audit_id}`. **Done** — do NOT try to confirm
-  it. Read-only / reversible actions live here (gmail `query_emails`,
-  `mark_read`, `add_labels`; monday `add_comment`; …).
-- **`requires_confirmation: true` (or undefined = default)** → returns
-  `{kind:"draft", draft_id, preview, expires_at}`. **Show the `preview`, get
-  explicit user consent, then `confirm_action draft_id=<…>`.** Destructive sends
-  (email, calendar invite, doc create) live here. Drafts expire in 1 hour.
+  `{kind:"auto_executed", result, action_record_id}`. **Done** — do NOT try to
+  confirm it, and do not assume it was read-only.
+- **`kind:"rate_limited"`** → nothing ran and no upstream call was made. Retry
+  after `retry_after_seconds`.
+- **`kind:"auto_failed"`** → the action was attempted, so whether an outbound
+  write reached the provider is **unknown**. Never blind-retry: read the state
+  back (or send the user to `/inbox`) before re-sending. A pure read is safe to
+  retry.
+- **`requires_confirmation` absent from the frontmatter** → the page predates
+  the field, so the outcome cannot be predicted. Never assume it will draft:
+  dispatch the full tuple, branch on the returned `kind`, and report
+  `auto_executed` in the past tense.
+- **`requires_confirmation: true`** → returns
+  `{kind:"draft", draft_id, action, preview, payload, confirm_hint, expires_at}`.
+  Relay the `preview` and `confirm_hint`, then stop. The user confirms through
+  the real controls in `/inbox` (web/mobile) or Telegram. Do **not** call
+  `confirm_action` from this agent loop. If the user cancels or corrects the
+  draft, call `discard_action`; for a correction, draft the structured action
+  again with the new input. Destructive sends (email, calendar invite, doc
+  create) live here. After 1 hour a draft moves to the `/inbox` Expired tab but
+  remains approvable, so discard the old draft before redrafting.
 
-`confirm_action` is one-shot and idempotent across surfaces (MCP / web / Telegram)
-— a second call returns the existing result instead of re-firing. `edits={…}`
-on confirm patches whitelisted fields (email: to/cc/bcc/subject/body; event:
-summary/description/location/start/end/attendees/send_updates; file: name/content).
+The out-of-band surfaces hold the confirmation capability; this chat does not.
 
 ### Live Gmail search
 
-gmail-inbox ships `query_emails` (`requires_confirmation: false`) — runs native
+gmail-inbox ships `search_emails` (`requires_confirmation: false`) — runs native
 Gmail search at runtime for mail the ingested pages don't cover. `input={query:
-"<gmail syntax>", limit: 1..50}`. Reach for it AFTER `list_pages`/`search` come
-up short, not before.
+"<gmail syntax>", limit: 1..50}`; pass `write_pages: true` to ALSO persist each
+match as an `email` page. Reach for it AFTER `list_pages`/`search` come up short,
+not before.
 
-## Legacy fallback (one line)
+## Gmail / Calendar / Drive
 
-If no `integration_action` matches: `act_on_integration source=<gmail|calendar|drive> request="<NL>"` → returns `{kind:"draft"|"clarification"|"noop"}`.
-Same draft→`confirm_action`/`discard_action` gate. (Being deprecated as
-integrations migrate to codex.)
+These are codex installs like any other. `query type=integration_action` finds
+their action pages; `get_page` reveals the `install_id`. Dispatch the same
+`install_id` + `action_name` + `input` tuple. A bare `source` drafts nothing.
 
 ## Routing a generic "message someone"
 
@@ -58,4 +71,5 @@ messaging integration the user actually has connected. Use `gmail` only when the
 say "email," give an email address, or are replying to/forwarding a thread.
 `calendar`/`drive` only when explicit.
 
-**Always show the preview and get a yes before confirming a destructive action.**
+**Always relay a destructive action's preview and confirmation hint, then leave
+the decision to the user's out-of-band approval surface.**
