@@ -14,7 +14,8 @@ no installed action covers it; there is no source-enum fallback.
 1. **Discover** — `query type=integration_action text="<natural-language intent>"`.
    It returns ranked page slugs; call `get_page` on the selected result to read
    its frontmatter: `install_id`, `action_name`, `description`, `input_schema`,
-   `requires_confirmation`, and `examples` (strong hints for shaping `input`).
+   `requires_confirmation`, and `side_effect`. The page body carries example
+   requests — strong hints for shaping `input`.
 2. **Dispatch** — `act_on_integration install_id=<…> action_name=<…> input={…}`
    (input matches `input_schema`; do not send a free-form `request`).
    Build `input` yourself from the user's words; if the ask is fuzzy, the
@@ -49,10 +50,11 @@ The out-of-band surfaces hold the confirmation capability; this chat does not.
 
 ### Live Gmail search
 
-gmail-inbox ships `query_emails` (`requires_confirmation: false`) — runs native
+gmail-inbox ships `search_emails` (`requires_confirmation: false`) — runs native
 Gmail search at runtime for mail the ingested pages don't cover. `input={query:
-"<gmail syntax>", limit: 1..50}`. Reach for it AFTER `list_pages`/`search` come
-up short, not before.
+"<gmail syntax>", limit: 1..50}`; pass `write_pages: true` to ALSO persist each
+match as an `email` page. Reach for it AFTER `list_pages`/`search` come up short,
+not before.
 
 ## Gmail / Calendar / Drive
 
