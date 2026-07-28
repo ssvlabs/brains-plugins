@@ -16,6 +16,12 @@ const PLUGIN = join(ROOT, "plugins", "brains");
 const CODEX_MCP_SCOPES = ["read", "write"];
 const CODEX_MCP_KEYS = ["type", "url", "scopes"];
 
+// The oldest Codex that can run this install, and the command that proves it. The floor is set by
+// the `codex plugin` command surface — `codex mcp login` shipped much earlier, so probing the login
+// would pass on versions that then fail at `codex plugin marketplace add`.
+const CODEX_MIN_VERSION = "0.131";
+const CODEX_CAPABILITY_PROBE = "codex plugin --help";
+
 class AssertionError extends Error {}
 
 function readJson(path: string): any {
@@ -50,6 +56,7 @@ const claudeHooks = readJson(join(PLUGIN, "hooks", "claude-hooks.json"));
 const codexHooks = readJson(join(PLUGIN, "hooks", "hooks.json"));
 const codexMcp = readJson(join(PLUGIN, ".mcp.json"));
 const turnHook = readFileSync(join(PLUGIN, "hooks", "brains-turn.sh"), "utf8");
+const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 const core = readFileSync(join(PLUGIN, "core.md"), "utf8");
 const writeSkill = readFileSync(join(PLUGIN, "skills", "brains-write", "SKILL.md"), "utf8");
 const coreNormalized = core.replace(/\s+/g, " ");
@@ -68,6 +75,12 @@ assert(codexMarketplace.plugins[0]?.source?.path === "./plugins/brains", "Codex 
 assert(codexMarketplace.plugins[0]?.policy?.installation === "AVAILABLE", "Codex install policy missing");
 // Codex authenticates the MCP server on first use (`codex mcp login brains`), not during
 // `plugin add` — its plugin manifest has no field that could carry a credential at install time.
+//
+// Do NOT flip this back to ON_INSTALL on the observation that the desktop app kicks off a login
+// during install: it does (its app-server install handlers start an OAuth login per declared
+// server), but the install COMPLETES either way and the CLI performs no login at all, so ON_INSTALL
+// would misdescribe the contract this repo documents. The startup auto-update path does not do it,
+// which is why a plugin already installed stays logged out until someone runs the login.
 assert(codexMarketplace.plugins[0]?.policy?.authentication === "ON_USE", "Codex auth policy must be ON_USE");
 
 const claudeEvents = Object.keys(claudeHooks.hooks).sort();
@@ -95,6 +108,18 @@ for (const command of hookScripts(codexHooks)) {
     `Codex hook command must guard against the Claude runtime: ${command}`,
   );
 }
+
+// One file, one key, one server. The per-key allow-list below guards what the `brains` entry may
+// declare; these two guard the file around it, so a second server — including a stdio `command`
+// server, which Codex would launch on the user's machine — cannot ride along unnoticed.
+assert(
+  JSON.stringify(Object.keys(codexMcp)) === JSON.stringify(["mcpServers"]),
+  `Codex MCP file may only contain mcpServers — got ${Object.keys(codexMcp).join(", ")}`,
+);
+assert(
+  JSON.stringify(Object.keys(codexMcp.mcpServers ?? {})) === JSON.stringify(["brains"]),
+  `Codex MCP file may only declare the brains server — got ${Object.keys(codexMcp.mcpServers ?? {}).join(", ")}`,
+);
 
 assert(codexMcp.mcpServers?.brains?.type === "http", "Codex brains MCP must be HTTP");
 assert(codexMcp.mcpServers?.brains?.url === "https://mcp.mybrains.ai/mcp", "Codex brains MCP URL mismatch");
@@ -139,8 +164,13 @@ if (!codexOnPath) {
     const listed = codex(["mcp", "list", "--json"]);
     assert(listed.status === 0, `codex mcp list --json failed: ${listed.stderr}`);
     const servers = JSON.parse(listed.stdout);
-    const resolved = servers.find((s: any) => s.name === "brains");
-    assert(resolved, "codex did not resolve a `brains` MCP server from the plugin declaration");
+    // Assert the whole resolved set, not just that ours is in it — selecting `brains` out of a
+    // longer list would hide a sibling the plugin had quietly introduced.
+    assert(
+      JSON.stringify(servers.map((s: any) => s.name)) === JSON.stringify(["brains"]),
+      `codex must resolve exactly one server named brains — got ${servers.map((s: any) => s.name).join(", ") || "none"}`,
+    );
+    const resolved = servers[0];
     assert(resolved.enabled === true, "resolved brains MCP server must be enabled");
     assert(
       resolved.transport?.type === "streamable_http",
@@ -223,6 +253,39 @@ assert(!writeSkillNormalized.includes("never call `discard_action`"), "draft dis
 assert(writeSkillNormalized.includes("remains approvable"), "expired drafts must not be described as inert");
 assert(writeSkillNormalized.includes("A bare `source` drafts nothing"), "source-only action fallback must stay prohibited");
 assert(!/act_on_integration[^.]{0,200}request=/.test(writeSkillNormalized), "free-form action request must not return");
+
+// This README is the install instructions for anyone who finds the repo directly rather than the
+// guided page, so it has to carry the same contract. It documented `export BRAINS_API_TOKEN` as the
+// way in long after that stopped being able to work, which is exactly the drift these pin.
+const codexReadme = readme.slice(
+  readme.indexOf("## Install for Codex"),
+  readme.indexOf("## Install for Claude Code"),
+);
+assert(codexReadme.length > 0, "README must document a Codex install");
+assert(
+  codexReadme.includes("codex mcp login brains"),
+  "README's Codex install must sign Codex in with `codex mcp login brains`",
+);
+assert(
+  codexReadme.includes(CODEX_MIN_VERSION) && codexReadme.includes(CODEX_CAPABILITY_PROBE),
+  `README's Codex install must state the ${CODEX_MIN_VERSION} floor and the \`${CODEX_CAPABILITY_PROBE}\` check`,
+);
+// The token is still documented, but only under the optional capture/inbox heading — never in the
+// install sequence itself. Anything above that heading claiming a token is how you get in is the
+// regression this catches.
+const optionalHeadingIndex = codexReadme.indexOf("### Optional");
+assert(optionalHeadingIndex > 0, "README must keep the optional capture/inbox section for Codex");
+const codexPrerequisites = codexReadme.slice(0, optionalHeadingIndex);
+for (const forbidden of ["BRAINS_API_TOKEN", "launchctl setenv"]) {
+  assert(
+    !codexPrerequisites.includes(forbidden),
+    `README must not present \`${forbidden}\` as a Codex install prerequisite — it belongs under the optional capture/inbox section`,
+  );
+}
+assert(
+  codexReadme.slice(optionalHeadingIndex).includes("launchctl setenv"),
+  "README's optional section must keep the desktop launchctl path — a desktop app inherits no shell export",
+);
 
 assert(
   turnHook.includes('CLIENT="claude"'),

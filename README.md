@@ -10,29 +10,70 @@ authentication declarations are client-specific.
 
 ## Install for Codex
 
-Find your brains API token in your brains account settings, then make it
-available to Codex as `BRAINS_API_TOKEN`.
+No token needed — Codex signs itself in.
+
+Needs Codex **0.131** or newer. Check with:
 
 ```sh
-export BRAINS_API_TOKEN="<your token>"
-codex plugin marketplace add ssvlabs/brains-plugins
-codex plugin add brains@brains
+codex plugin --help
 ```
 
-The `export` applies to Codex started from that shell. If you use the macOS
-desktop app, set the variable for the app's launch environment (for example,
-`launchctl setenv BRAINS_API_TOKEN "<your token>"`) before restarting it.
+If that errors with an unknown subcommand, run `codex update` first.
+
+```sh
+codex plugin marketplace add ssvlabs/brains-plugins
+codex plugin add brains@brains
+codex mcp login brains
+```
+
+`codex mcp login brains` opens your browser to approve the connection. The
+approval screen says **An app on this computer** and shows a `127.0.0.1` address
+whose port changes every time — that is Codex waiting on your machine, and it is
+expected. Codex stores the credential itself, so there is nothing to copy or
+keep. Confirm with `codex mcp list`: brains should read **OAuth**.
 
 Restart the ChatGPT desktop app or start a new Codex thread. The first time the
 plugin loads, open `/hooks` and trust the bundled brains hooks so automatic
 recall, capture, inbox delivery, and error feedback can run.
+
+Everyday reading and writing is covered by default. For admin-gated tools or
+performance insights, sign in asking for them explicitly (both also need the
+matching access on your account):
+
+```sh
+codex mcp login brains --scopes read,write,admin
+codex mcp login brains --scopes read,write,perf_insights
+```
 
 For a local checkout under development:
 
 ```sh
 codex plugin marketplace add /absolute/path/to/brains-plugins
 codex plugin add brains@brains
+codex mcp login brains
 ```
+
+### Optional: conversation capture and the inbox
+
+The tools above work without this. Capture and the inbox are shell hooks that
+authenticate separately from the MCP server and cannot read the credential Codex
+keeps internally, so they need a brains API token of their own — find it in your
+brains account settings. Without one they simply stay off.
+
+```sh
+export BRAINS_API_TOKEN="<your token>"
+```
+
+That applies to Codex started from that shell. The macOS desktop app never
+inherits a shell export, so set it for the app's launch environment instead and
+restart the app:
+
+```sh
+launchctl setenv BRAINS_API_TOKEN "<your token>"
+```
+
+This token is only for capture and the inbox. It is **not** how Codex
+authenticates the brains tools — that is `codex mcp login brains` above.
 
 ## Install for Claude Code
 
