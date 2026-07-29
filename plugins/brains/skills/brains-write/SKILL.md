@@ -18,7 +18,10 @@ slug to read frontmatter. Use its `install_id`, `action_name`, and structured
 `input` in `act_on_integration`; this tuple is the only call
 shape. `requires_confirmation:false` means the action runs inline. If
 `requires_confirmation` is absent, the page predates the field: treat whether
-it drafts or runs as unknown. Inline external writes include `rsvp_event`,
+it drafts or runs as unknown. `side_effect` says where it writes
+(`external` = the provider, visible outside brains;
+`null` or absent = undeclared, treat as external). Inline external writes
+include `rsvp_event`,
 `create_draft`, and `add_labels`; do not infer safety from read vs write.
 
 | `kind` | What happened | What you do |
