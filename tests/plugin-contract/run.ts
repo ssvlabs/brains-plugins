@@ -22,6 +22,77 @@ const CODEX_MCP_KEYS = ["type", "url", "scopes"];
 const CODEX_MIN_VERSION = "0.131";
 const CODEX_CAPABILITY_PROBE = "codex plugin --help";
 
+// Claude Code signs itself into the MCP server, so the login command is part of the contract:
+// the manifest copy, the README and the drift nudge must all name it WITH its plugin-scoped
+// argument. A bare `claude mcp login` is unusable — the CLI requires the server name.
+const CLAUDE_MCP_LOGIN = "claude mcp login plugin:brains:brains";
+const CLAUDE_MCP_URL = "${user_config.endpoint}/mcp";
+const CLAUDE_ENDPOINT = "https://mcp.mybrains.ai";
+const CLAUDE_LOOPBACK = "127.0.0.1";
+const CLAUDE_MCP_KEYS = ["type", "url"];
+const CLAUDE_OPTIONAL_HEADING = "### Optional:";
+
+// Approved token copy, pinned verbatim. Hand-written phrasing checks proved both evadable and
+// prone to false positives, so the wording itself is the contract; the regex pair further down
+// stays only as a backstop.
+const CLAUDE_TOKEN_TITLE = "brains API token (optional)";
+const CLAUDE_TOKEN_DESCRIPTION =
+  "Optional. Enables conversation capture and the inbox, which authenticate separately from the " +
+  "MCP server. NOT how the brains tools authenticate — that is `claude mcp login " +
+  "plugin:brains:brains`. Find it in your brains account settings; without one, capture and the " +
+  "inbox simply stay off.";
+
+// Approved README copy. The opener and the version note are pinned individually as well as
+// inside the region below, so a reviewer gets a precise failure before the whole-region diff.
+const CLAUDE_TOKEN_OPENER = "No token needed — Claude Code signs itself in.";
+const CLAUDE_VERSION_NOTE =
+  "This flow was verified on Claude Code 2.1.220. If `claude mcp login` is not a recognised\n" +
+  "command, update Claude Code.";
+
+// No Claude Code version floor is verifiable — the CLI is closed source and ships no probe for
+// a minimum. Below the Optional heading the word "token" is legitimate, so only version floors
+// are banned there: a version shape (two OR three components, so `2.1+` cannot slip past a
+// semver-only pattern) and the comparative vocabulary that turns a version into a requirement.
+const CLAUDE_VERSION_SHAPE = /\bv?\d+\.\d+(\.\d+)?\b/;
+const CLAUDE_FLOOR_VOCAB =
+  /\b(minimum|at least|no older|requires?|or (a )?(newer|later)|and (later|up)|or above|and above)\b/i;
+
+// The entire region from the Claude install heading to the Optional heading, pinned verbatim.
+// Enumerated bans on this region kept losing to paraphrase, so the copy IS the contract.
+const CLAUDE_INSTALL_REGION = [
+  "## Install for Claude Code",
+  "",
+  CLAUDE_TOKEN_OPENER,
+  "",
+  "```sh",
+  "claude plugin marketplace add https://github.com/ssvlabs/brains-plugins.git",
+  "claude plugin install brains@brains",
+  CLAUDE_MCP_LOGIN,
+  "```",
+  "",
+  "If Claude Code does not recognise that login name, run `claude mcp list` and use the name it",
+  "shows for the brains server.",
+  "",
+  "`" + CLAUDE_MCP_LOGIN + "` opens your browser to approve the connection. The",
+  "approval screen says **An app on this computer** and shows a `127.0.0.1` address whose port",
+  "changes every time — that is Claude Code waiting on your machine, and it is expected. Claude",
+  "Code stores the credential itself, so there is nothing to copy or keep. Confirm with",
+  "`claude mcp list`.",
+  "",
+  CLAUDE_VERSION_NOTE,
+  "",
+  "Restart Claude Code or start a new session. The first time the plugin loads, trust the bundled",
+  "brains hooks so automatic recall, capture, inbox delivery, and error feedback can run.",
+  "",
+  "For a local checkout under development:",
+  "",
+  "```sh",
+  "claude plugin marketplace add /absolute/path/to/brains-plugins",
+  "claude plugin install brains@brains",
+  CLAUDE_MCP_LOGIN,
+  "```",
+].join("\n");
+
 class AssertionError extends Error {}
 
 function readJson(path: string): any {
@@ -41,6 +112,15 @@ async function waitForFile(path: string, timeoutMs = 1_000): Promise<boolean> {
   return existsSync(path);
 }
 
+// Copy pins tolerate re-wrapping: the manifest holds each string on a single JSON line, while the
+// constants above are concatenated across source lines to stay readable.
+const normalizeCopy = (value: string): string => value.replace(/\s+/g, " ").trim();
+
+// Region pins do NOT tolerate whitespace changes: in Markdown an indented fence opener stops
+// opening a fence and two trailing spaces render a hard break, and this repo has no formatter or
+// .editorconfig that would ever introduce benign churn. Line endings only.
+const normalizeRegion = (value: string): string => value.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+
 function hookScripts(config: any): string[] {
   return Object.values(config.hooks ?? {}).flatMap((groups: any) =>
     groups.flatMap((group: any) => group.hooks ?? [])
@@ -55,7 +135,9 @@ const codexMarketplace = readJson(join(ROOT, ".agents", "plugins", "marketplace.
 const claudeHooks = readJson(join(PLUGIN, "hooks", "claude-hooks.json"));
 const codexHooks = readJson(join(PLUGIN, "hooks", "hooks.json"));
 const codexMcp = readJson(join(PLUGIN, ".mcp.json"));
+const claudeManifestSource = readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8");
 const turnHook = readFileSync(join(PLUGIN, "hooks", "brains-turn.sh"), "utf8");
+const inboxHook = readFileSync(join(PLUGIN, "hooks", "lib", "brains-inbox.sh"), "utf8");
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 const core = readFileSync(join(PLUGIN, "core.md"), "utf8");
 const writeSkill = readFileSync(join(PLUGIN, "skills", "brains-write", "SKILL.md"), "utf8");
@@ -144,6 +226,111 @@ assert(
   `Codex brains MCP may only declare ${CODEX_MCP_KEYS.join(", ")} — got ${Object.keys(codexMcp.mcpServers?.brains ?? {}).join(", ")}`,
 );
 
+// Claude Code owns the MCP credential via its own OAuth login, exactly as Codex does. `headers`
+// must stay ABSENT: a declared Authorization header disables the OAuth path outright — the CLI
+// refuses the login with "authenticates with the `Authorization` header in its configuration, so
+// there's no separate login" — so declaring one would make signing in impossible rather than
+// merely redundant.
+assert(
+  !("headers" in (claudeManifest.mcpServers?.brains ?? {})),
+  "Claude brains MCP must not declare headers — an Authorization header disables the OAuth login path",
+);
+
+// One server, declared inline. The per-key allow-list below guards the `brains` entry; these
+// guard the map around it, so a second server cannot ride along unnoticed.
+assert(
+  typeof claudeManifest.mcpServers === "object" && claudeManifest.mcpServers !== null,
+  "Claude manifest must declare mcpServers inline",
+);
+assert(
+  JSON.stringify(Object.keys(claudeManifest.mcpServers)) === JSON.stringify(["brains"]),
+  `Claude manifest may only declare the brains server — got ${Object.keys(claudeManifest.mcpServers).join(", ")}`,
+);
+// JSON.parse keeps the LAST duplicate root key, so the parsed view above is blind to a second
+// `mcpServers` block whose final copy happens to be clean. Count the declarations in the source.
+assert(
+  (claudeManifestSource.match(/"mcpServers"\s*:/g) ?? []).length === 1,
+  "Claude manifest source must declare mcpServers exactly once",
+);
+assert(claudeManifest.mcpServers.brains.type === "http", "Claude brains MCP must be HTTP");
+// Pin the interpolation, not a resolved URL: hard-coding production here would silently ignore a
+// user's configured endpoint, and a broken interpolation would resolve to a 404.
+assert(
+  claudeManifest.mcpServers.brains.url === CLAUDE_MCP_URL,
+  `Claude brains MCP URL must be ${CLAUDE_MCP_URL}`,
+);
+// A stray key INSIDE the server entry passes `claude plugin validate --strict` in total silence —
+// only unknown TOP-LEVEL fields warn — so a `scopes` key copied in good faith from the Codex
+// declaration next door would look accepted and do nothing. This allow-list is the only check
+// that catches it.
+assert(
+  JSON.stringify(Object.keys(claudeManifest.mcpServers.brains).sort())
+    === JSON.stringify([...CLAUDE_MCP_KEYS].sort()),
+  `Claude brains MCP may only declare ${CLAUDE_MCP_KEYS.join(", ")} — got ${Object.keys(claudeManifest.mcpServers.brains).join(", ")}`,
+);
+
+// The URL above interpolates this, so it can never be missing or empty.
+const claudeEndpointConfig = claudeManifest.userConfig?.endpoint ?? {};
+assert(
+  typeof claudeEndpointConfig.default === "string" && claudeEndpointConfig.default !== "",
+  "Claude endpoint config must keep a non-empty default — the MCP URL interpolates it",
+);
+assert(
+  claudeEndpointConfig.default === CLAUDE_ENDPOINT,
+  `Claude endpoint default must be ${CLAUDE_ENDPOINT}`,
+);
+
+// Conversation capture and the inbox are OPT-IN now that they are the token's only job. This must
+// stay optional for a reason that is invisible from the file: a `required: true` user config left
+// unset makes Claude Code DROP the server silently — the install succeeds with a warning and
+// `claude mcp list` shows nothing at all, so the tools vanish rather than prompt.
+assert("token" in (claudeManifest.userConfig ?? {}), "Claude manifest must keep the token config");
+const claudeTokenConfig = claudeManifest.userConfig.token;
+assert(claudeTokenConfig.required === false, "Claude token config must be optional (required: false)");
+assert(
+  /optional/i.test(claudeTokenConfig.title),
+  "Claude token title must present the token as optional",
+);
+for (const signal of ["capture", "inbox", CLAUDE_MCP_LOGIN]) {
+  assert(
+    claudeTokenConfig.description.includes(signal),
+    `Claude token description must name ${signal} — it says what the token is for and where MCP auth actually happens`,
+  );
+}
+assert(
+  normalizeCopy(claudeTokenConfig.title) === CLAUDE_TOKEN_TITLE,
+  "Claude token title must match the approved wording exactly",
+);
+assert(
+  normalizeCopy(claudeTokenConfig.description) === CLAUDE_TOKEN_DESCRIPTION,
+  "Claude token description must match the approved wording exactly",
+);
+// Best-effort backstop for a rewrite that edits the constants above too. These patterns are
+// neither sound nor complete — they cannot see "mandatory for brains tools", and they would
+// misfire on some compliant prose — but they do catch the canonical regression of presenting the
+// token as how the tools authenticate.
+for (const pattern of [
+  /requir\w*[\s\S]{0,80}?\b(tools?|mcp)\b/i,
+  /\b(tools?|mcp)\b[\s\S]{0,40}?\brequir/i,
+]) {
+  assert(
+    !pattern.test(`${claudeTokenConfig.title} ${claudeTokenConfig.description}`),
+    "Claude token copy must not describe the token as required for the tools or MCP — that is `claude mcp login`",
+  );
+}
+
+// The Claude drift nudge is read aloud to a user mid-session. A plugin from the header era is
+// registered but logged out, so updating without signing in leaves the tools unreachable — the
+// nudge has to carry the login, with its name argument.
+const claudeNudge = inboxHook
+  .split("\n")
+  .find((line) => line.includes("brains:update") && line.includes("claude plugin update brains"));
+assert(claudeNudge, "inbox engine must keep a Claude drift nudge");
+assert(
+  claudeNudge.includes(CLAUDE_MCP_LOGIN),
+  "Claude drift nudge must include the sign-in step — updating alone leaves the user logged out",
+);
+
 // Ask a real Codex what it made of the declaration, rather than trusting that the file we wrote is
 // the config Codex resolved. This is what catches an upstream change that stops honouring the
 // plugin MCP shape: the keys above could all be correct and the server still fail to resolve, or
@@ -193,6 +380,40 @@ if (!codexOnPath) {
     console.log("plugin contract: resolved-config check OK (codex resolved the plugin declaration)");
   } finally {
     rmSync(home, { recursive: true, force: true });
+  }
+}
+
+// Ask a real Claude Code what it makes of the manifest. `--strict` is what turns an unknown
+// TOP-LEVEL field from a warning into a non-zero exit; a stray key inside the server entry stays
+// silent even here, which is why the allow-list above exists.
+//
+// Unlike the Codex mirror this FAILS CLOSED in CI. The workflow installs a pinned
+// @anthropic-ai/claude-code, so a missing or non-executing CLI there means the install broke —
+// not that validation is unavailable — and skipping would make the job green having validated
+// nothing. A visible skip is for local runs only.
+const inCI = !["", "0", "false"].includes((process.env.CI ?? "").toLowerCase());
+const claudeOnPath = spawnSync("claude", ["--version"], { encoding: "utf8" }).status === 0;
+if (!claudeOnPath) {
+  assert(!inCI, "claude must be on PATH in CI — the manifest validation cannot be skipped");
+  console.log("plugin contract: SKIP claude plugin validate (claude not on PATH)");
+} else {
+  const claudeHome = mkdtempSync(join(tmpdir(), "brains-plugin-contract-claude-"));
+  try {
+    const validated = spawnSync("claude", ["plugin", "validate", "--strict", PLUGIN], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: claudeHome, CLAUDE_CONFIG_DIR: join(claudeHome, "config") },
+    });
+    const validateOutput = `${validated.stdout ?? ""}${validated.stderr ?? ""}`;
+    assert(validated.status === 0, `claude plugin validate --strict failed:\n${validateOutput}`);
+    // Belt and braces: if a future CLI drops or renames --strict, a warning could ride along on a
+    // zero exit. Reject any warning text regardless of the exit code.
+    assert(
+      !/⚠|warning/i.test(validateOutput),
+      `claude plugin validate reported a warning:\n${validateOutput}`,
+    );
+    console.log("plugin contract: claude plugin validate --strict OK");
+  } finally {
+    rmSync(claudeHome, { recursive: true, force: true });
   }
 }
 
@@ -292,6 +513,78 @@ for (const forbidden of ["BRAINS_API_TOKEN", "launchctl setenv"]) {
 assert(
   codexReadme.slice(optionalHeadingIndex).includes("launchctl setenv"),
   "README's optional section must keep the desktop launchctl path — a desktop app inherits no shell export",
+);
+
+// Same treatment for the Claude Code section, sliced between its own heading and the shared
+// layout section. Resolve the end delimiter first for the same reason as above.
+const sharedLayoutStart = readme.indexOf("## Shared layout");
+assert(sharedLayoutStart >= 0, "README must keep the shared layout section — it ends the Claude slice");
+assert(
+  sharedLayoutStart > claudeStart,
+  "README's shared layout section must follow the Claude Code install — the checks below slice between them",
+);
+const claudeReadme = readme.slice(claudeStart, sharedLayoutStart);
+// Pinned individually so a single dropped element names itself, ahead of the whole-region pin.
+for (const pinned of [
+  "claude plugin marketplace add https://github.com/ssvlabs/brains-plugins.git",
+  "claude plugin install brains@brains",
+  CLAUDE_MCP_LOGIN,
+  "claude mcp list",
+  "An app on this computer",
+  CLAUDE_LOOPBACK,
+  CLAUDE_TOKEN_OPENER,
+  CLAUDE_VERSION_NOTE,
+]) {
+  assert(claudeReadme.includes(pinned), `README's Claude install must keep: ${pinned}`);
+}
+const claudeOptionalIndex = claudeReadme.indexOf(CLAUDE_OPTIONAL_HEADING);
+assert(claudeOptionalIndex > 0, "README must keep the optional capture/inbox section for Claude Code");
+// The whole pre-Optional region is pinned verbatim. Enumerated bans on this region kept losing to
+// paraphrase — "prompts during installation for the brains token" walked past a token ban, and
+// "or a newer release" walked past a version-floor ban — so the approved copy is the contract.
+// Changing it is a deliberate two-line diff: this constant and the README together.
+assert(
+  normalizeRegion(claudeReadme.slice(0, claudeOptionalIndex)) === CLAUDE_INSTALL_REGION,
+  "README's Claude install region must match the approved copy exactly (README and CLAUDE_INSTALL_REGION must be edited together)",
+);
+// Below the heading "token" is legitimate — it IS the token section — so pinning the copy would
+// freeze docs that should stay editable. Ban only version floors here. Best-effort against
+// paraphrase; the region pin above carries the strong guarantee.
+const claudeOptionalBody = claudeReadme.slice(claudeOptionalIndex);
+assert(
+  !CLAUDE_VERSION_SHAPE.test(claudeOptionalBody),
+  "README's Claude token section must not name a version — no Claude Code floor is verifiable",
+);
+assert(
+  !CLAUDE_FLOOR_VOCAB.test(claudeOptionalBody),
+  "README's Claude token section must not imply a minimum Claude Code version",
+);
+// Every published command gets copied verbatim by someone, so parse them instead of trusting a
+// read-through: `--config token=<your token>` looked fine in review and is a syntax error in both
+// bash and zsh, because the angle brackets are redirections. Checking the whole block also covers
+// the three-command install, where a broken line would strand a user mid-install.
+const claudeShellBlocks = [...claudeReadme.matchAll(/```sh\n([\s\S]*?)```/g)].map((match) => match[1]);
+assert(claudeShellBlocks.length > 0, "README's Claude install must keep its shell blocks");
+for (const block of claudeShellBlocks) {
+  const parsed = spawnSync("bash", ["-n"], { input: block, encoding: "utf8" });
+  assert(
+    parsed.status === 0,
+    `README's Claude shell block is not valid shell:\n${block}\n${parsed.stderr}`,
+  );
+}
+
+// A plugin from the header era is registered but logged out, so the migration path has to say
+// both halves: update, then sign in.
+const claudeMigrationIndex = claudeReadme.indexOf("### Already installed?");
+assert(claudeMigrationIndex > 0, "README must tell an existing Claude Code install how to migrate");
+const claudeMigration = claudeReadme.slice(claudeMigrationIndex);
+assert(
+  claudeMigration.includes("claude plugin update brains"),
+  "README's Claude migration must update the plugin",
+);
+assert(
+  claudeMigration.includes(CLAUDE_MCP_LOGIN),
+  "README's Claude migration must sign in — updating alone leaves the user logged out",
 );
 
 assert(
