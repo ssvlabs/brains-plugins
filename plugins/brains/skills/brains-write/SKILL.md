@@ -25,10 +25,10 @@ it drafts or runs as unknown. Inline external writes include `rsvp_event`,
 |---|---|---|
 | `draft` | Nothing sent; it carries `preview`, `confirm_hint`, and `expires_at`. | Relay the preview and hint, then stop. |
 | `auto_executed` | It already ran; it carries `result` and `action_record_id`. | Report what happened, past tense. |
-| `auto_failed` | It was attempted; whether an outbound write reached the provider is **unknown**. | Don't blind-retry. Read provider state or `/inbox` before re-sending; a pure read is safe to retry. |
+| `auto_failed` | It was attempted; whether an outbound write reached the provider is **unknown**. | Don't blind-retry. Read provider state or `/inbox` before re-sending; retry only when the action is idempotent or the error proves nothing was sent. A pure read is safe to retry. |
 | `rate_limited` | Nothing ran and no upstream call occurred. | Retry after `retry_after_seconds`. |
 | `clarification` | The tuple was incomplete or ambiguous. | Answer its `question`, then resend the full tuple. |
-| `noop` | The integration is unavailable. | Relay its `reason` and point to `/integrations`. |
+| `noop` | The integration is unavailable, or the action was suppressed because an automation is running in verify mode. | Relay its `reason`. If it starts with `verify_mode:`, report that the action was safely suppressed; otherwise point to `/integrations`. |
 
 You can't confirm a draft from this loop. Only the user's out-of-band
 `/inbox` or Telegram surface has the confirmation secret. So never call `confirm_action` yourself.

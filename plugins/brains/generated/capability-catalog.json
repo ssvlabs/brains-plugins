@@ -5,7 +5,7 @@
   "capability_id": "integration-actions",
   "source_repository": "https://github.com/ssvlabs/brains",
   "source_generator": "apps/mcp/scripts/generate-capability-catalog.ts",
-  "catalog_sha256": "1952b377d9aea55847855d35f1c929cde470538d9318031571aeed286c713b52",
+  "catalog_sha256": "3dbd82bdcd875359ab55efef1eb3c9bc325d3805246ecf50bc6617fcdfb43ed7",
   "artifact_path": "plugins/brains/skills/brains-write/SKILL.md",
-  "artifact_sha256": "57f3839e5ddffa6c3d5fdad931b1a8f2bea16baac71fe0d68d05888b3caf1ddd"
+  "artifact_sha256": "52f9f4f66a63f739478bf387ed060e365cb30596827fd40010735774d209e39c"
 }
