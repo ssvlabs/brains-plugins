@@ -117,7 +117,7 @@ assert(core.length < 3_000, "always-loaded core must stay below 3,000 characters
 // immutable artifact digest locally; installation never fetches a mutable copy.
 assert(capabilityManifest.schema_version === 1, "capability manifest schema mismatch");
 assert(capabilityManifest.catalog_schema_version === 1, "catalog schema mismatch");
-assert(capabilityManifest.renderer_version === 1, "catalog renderer mismatch");
+assert(capabilityManifest.renderer_version === 2, "catalog renderer mismatch");
 assert(capabilityManifest.capability_id === "integration-actions", "capability id mismatch");
 assert(
   capabilityManifest.artifact_path === "plugins/brains/skills/brains-write/SKILL.md",
@@ -135,17 +135,20 @@ assert(
 
 // Keep independent semantic assertions: digest equality proves provenance, not
 // that the canonical source itself kept the load-bearing safety rules.
-assert(writeSkillNormalized.includes("install_id=<…> action_name=<…> input={…}"), "structured action tuple missing");
-assert(writeSkillNormalized.includes("call `get_page` on the selected result"), "action discovery must resolve frontmatter");
 assert(
-  writeSkillNormalized.includes("`requires_confirmation` absent from the frontmatter") &&
-    writeSkillNormalized.includes("the outcome cannot be predicted") &&
-    writeSkillNormalized.includes("Never assume it will draft"),
+  writeSkillNormalized.includes("its `install_id`, `action_name`, and structured `input` in `act_on_integration`") &&
+    writeSkillNormalized.includes("this tuple is the only call shape"),
+  "structured action tuple missing",
+);
+assert(writeSkillNormalized.includes("call `get_page` on the selected"), "action discovery must resolve frontmatter");
+assert(
+  writeSkillNormalized.includes("`requires_confirmation` is absent") &&
+    writeSkillNormalized.includes("treat whether it drafts or runs as unknown"),
   "absent requires_confirmation must remain unknown rather than predict a draft",
 );
 assert(
-  writeSkillNormalized.includes('**`requires_confirmation: false`** → executes inline now, returns') &&
-    writeSkillNormalized.includes('{kind:"auto_executed", result, action_record_id}'),
+  writeSkillNormalized.includes("`requires_confirmation:false` means the action runs inline") &&
+    writeSkillNormalized.includes("| `auto_executed` | It already ran; it carries `result` and `action_record_id`."),
   "requires_confirmation:false must be documented as already executed",
 );
 assert(writeSkillNormalized.includes("there is no source-enum fallback"), "legacy source-enum fallback must stay removed");
@@ -153,22 +156,22 @@ assert(!writeSkillNormalized.includes("Fall back to the legacy source-enum"), "s
 assert(writeSkillNormalized.includes("action_record_id"), "auto-executed result must expose action_record_id");
 assert(!writeSkillNormalized.includes("audit_id"), "stale auto-executed audit_id field must not return");
 assert(
-  writeSkillNormalized.includes('**`kind:"rate_limited"`** → nothing ran and no upstream call was made'),
+  writeSkillNormalized.includes("| `rate_limited` | Nothing ran and no upstream call occurred."),
   "rate-limited actions must be documented as not attempted",
 );
-assert(writeSkillNormalized.includes('**`kind:"clarification"`**'), "clarification result kind missing");
-assert(writeSkillNormalized.includes('**`kind:"noop"`**'), "noop result kind missing");
+assert(writeSkillNormalized.includes("| `clarification` |"), "clarification result kind missing");
+assert(writeSkillNormalized.includes("| `noop` |"), "noop result kind missing");
 assert(
   writeSkillNormalized.includes("whether an outbound write reached the provider is **unknown**"),
   "auto-failed actions must preserve unknown-outcome guidance",
 );
-assert(writeSkillNormalized.includes("Never blind-retry"), "auto-failed external writes must not be blindly retried");
-assert(writeSkillNormalized.includes("The out-of-band surfaces hold the confirmation capability"), "approval boundary missing");
-assert(writeSkillNormalized.includes("Do **not** call `confirm_action`"), "agent self-confirm prohibition missing");
+assert(writeSkillNormalized.includes("Don't blind-retry"), "auto-failed external writes must not be blindly retried");
+assert(writeSkillNormalized.includes("out-of-band") && writeSkillNormalized.includes("confirmation secret"), "approval boundary missing");
+assert(writeSkillNormalized.includes("never call `confirm_action` yourself"), "agent self-confirm prohibition missing");
 assert(writeSkillNormalized.includes("call `discard_action`"), "agent-side draft discard path missing");
 assert(!writeSkillNormalized.includes("never call `discard_action`"), "draft discard guidance must remain actionable");
 assert(writeSkillNormalized.includes("remains approvable"), "expired drafts must not be described as inert");
-assert(writeSkillNormalized.includes("A bare `source` drafts nothing"), "source-only action fallback must stay prohibited");
+assert(writeSkillNormalized.includes("this tuple is the only call shape"), "source-only action fallback must stay prohibited");
 assert(!/act_on_integration[^.]{0,200}request=/.test(writeSkillNormalized), "free-form action request must not return");
 
 assert(
