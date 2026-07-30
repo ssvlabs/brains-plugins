@@ -16,21 +16,25 @@ Discover with `query type=integration_action text="<intent>"`.
 It returns slug/title/snippet, so call `get_page` on the selected
 slug to read frontmatter. Use its `install_id`, `action_name`, and structured
 `input` in `act_on_integration`; this tuple is the only call
-shape. `requires_confirmation:false` means the action runs inline. If
+shape. Partial tuples error; only bare legacy `source` returns `clarification`.
+`requires_confirmation:true` drafts for out-of-band approval;
+`requires_confirmation:false` runs inline. If
 `requires_confirmation` is absent, the page predates the field: treat whether
 it drafts or runs as unknown. `side_effect` says where it writes
 (`external` = the provider, visible outside brains;
 `null` or absent = undeclared, treat as external). Inline external writes
 include `rsvp_event`,
 `create_draft`, and `add_labels`; do not infer safety from read vs write.
+Cap: 30 auto-executions/install/60s.
+Automation `dry_run` suppresses external writes to no-call `[DRY RUN]` drafts.
 
 | `kind` | What happened | What you do |
 |---|---|---|
-| `draft` | Nothing sent; it carries `preview`, `confirm_hint`, and `expires_at`. | Relay the preview and hint, then stop. |
-| `auto_executed` | It already ran; it carries `result` and `action_record_id`. | Report what happened, past tense. |
+| `draft` | Nothing sent; it carries `preview`, `confirm_hint`, and `expires_at`. | Relay the preview and hint, then stop; only `draft` carries `confirm_hint`. |
+| `auto_executed` | It already ran; it carries `result` and `action_record_id`. | Report what happened, past tense; never say it is awaiting approval. |
 | `auto_failed` | It was attempted; whether an outbound write reached the provider is **unknown**. | Don't blind-retry. Read provider state or `/inbox` before re-sending; retry only when the action is idempotent or the error proves nothing was sent. A pure read is safe to retry. |
 | `rate_limited` | Nothing ran and no upstream call occurred. | Retry after `retry_after_seconds`. |
-| `clarification` | The tuple was incomplete or ambiguous. | Answer its `question`, then resend the full tuple. |
+| `clarification` | A `source`-only legacy call reached the shim; no action ran. | Answer its `question`, then resend the full tuple. |
 | `noop` | The integration is unavailable, or the action was suppressed because an automation is running in verify mode. | Relay its `reason`. If it starts with `verify_mode:`, report that the action was safely suppressed; otherwise point to `/integrations`. |
 
 You can't confirm a draft from this loop. Only the user's out-of-band

@@ -147,9 +147,15 @@ assert(
   "absent requires_confirmation must remain unknown rather than predict a draft",
 );
 assert(
-  writeSkillNormalized.includes("`requires_confirmation:false` means the action runs inline") &&
+  writeSkillNormalized.includes("`requires_confirmation:true` drafts for out-of-band approval") &&
+    writeSkillNormalized.includes("`requires_confirmation:false` runs inline") &&
     writeSkillNormalized.includes("| `auto_executed` | It already ran; it carries `result` and `action_record_id`."),
-  "requires_confirmation:false must be documented as already executed",
+  "both requires_confirmation branches must retain their distinct behavior",
+);
+assert(
+  writeSkillNormalized.includes("Partial tuples error") &&
+    writeSkillNormalized.includes("only bare legacy `source` returns `clarification`"),
+  "partial tuples must error; only the bare legacy source shim may clarify",
 );
 assert(writeSkillNormalized.includes("there is no source-enum fallback"), "legacy source-enum fallback must stay removed");
 assert(!writeSkillNormalized.includes("Fall back to the legacy source-enum"), "stale legacy fallback pointer must not return");
@@ -159,6 +165,10 @@ assert(
   writeSkillNormalized.includes("| `rate_limited` | Nothing ran and no upstream call occurred."),
   "rate-limited actions must be documented as not attempted",
 );
+assert(
+  writeSkillNormalized.includes("30 auto-executions/install/60s"),
+  "auto-execution rate-limit context missing",
+);
 assert(writeSkillNormalized.includes("| `clarification` |"), "clarification result kind missing");
 assert(writeSkillNormalized.includes("| `noop` |"), "noop result kind missing");
 assert(
@@ -166,6 +176,16 @@ assert(
   "auto-failed actions must preserve unknown-outcome guidance",
 );
 assert(writeSkillNormalized.includes("Don't blind-retry"), "auto-failed external writes must not be blindly retried");
+assert(
+  writeSkillNormalized.includes("only `draft` carries `confirm_hint`") &&
+    writeSkillNormalized.includes("never say it is awaiting approval"),
+  "draft and auto-executed reporting gates must remain distinct",
+);
+assert(
+  writeSkillNormalized.includes("`dry_run` suppresses external writes to no-call `[DRY RUN]` drafts"),
+  "dry-run external-write suppression missing",
+);
+assert(writeSkill.endsWith("\n"), "generated public skill must end with a newline");
 assert(writeSkillNormalized.includes("out-of-band") && writeSkillNormalized.includes("confirmation secret"), "approval boundary missing");
 assert(writeSkillNormalized.includes("never call `confirm_action` yourself"), "agent self-confirm prohibition missing");
 assert(writeSkillNormalized.includes("call `discard_action`"), "agent-side draft discard path missing");
