@@ -3,7 +3,7 @@
     "brains": {
       "type": "http",
       "url": "https://mcp.mybrains.ai/mcp",
-      "bearer_token_env_var": "BRAINS_API_TOKEN"
+      "scopes": ["read", "write"]
     }
   }
 }
