@@ -156,7 +156,7 @@ if [ "$MODE" = "startup" ]; then
     if [ "$CLIENT" = "codex" ]; then
       printf '%s\n' '<!-- brains:update -->brains plugin update available ('"$DRIFT_LINE"'): offer to run `codex plugin marketplace upgrade brains && codex plugin add brains@brains`, then start a new thread<!-- /brains:update -->'
     else
-      printf '%s\n' '<!-- brains:update -->brains plugin update available ('"$DRIFT_LINE"'): offer to run `claude plugin marketplace update brains && claude plugin update brains`, then /reload-plugins<!-- /brains:update -->'
+      printf '%s\n' '<!-- brains:update -->brains plugin update available ('"$DRIFT_LINE"'): offer to run `claude plugin marketplace update brains && claude plugin update brains && claude mcp login plugin:brains:brains`, then /reload-plugins<!-- /brains:update -->'
     fi
     log "drift nudge: $DRIFT_LINE"
   fi
