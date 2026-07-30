@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -141,6 +142,7 @@ const inboxHook = readFileSync(join(PLUGIN, "hooks", "lib", "brains-inbox.sh"), 
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 const core = readFileSync(join(PLUGIN, "core.md"), "utf8");
 const writeSkill = readFileSync(join(PLUGIN, "skills", "brains-write", "SKILL.md"), "utf8");
+const capabilityManifest = readJson(join(PLUGIN, "generated", "capability-catalog.json"));
 const coreNormalized = core.replace(/\s+/g, " ");
 const writeSkillNormalized = writeSkill.replace(/\s+/g, " ");
 
@@ -438,41 +440,85 @@ for (const signal of [
 }
 assert(core.length < 3_000, "always-loaded core must stay below 3,000 characters");
 
-// This public plugin is a sixth model-visible copy of the act contract, outside
-// the monorepo's ACT_CONTRACT_COPIES gate. Mirror its four load-bearing rules
-// here so a future compaction cannot drift independently again.
-assert(writeSkillNormalized.includes("install_id=<…> action_name=<…> input={…}"), "structured action tuple missing");
-assert(writeSkillNormalized.includes("call `get_page` on the selected result"), "action discovery must resolve frontmatter");
+// The public face is generated from the monorepo capability catalog. Verify its
+// immutable artifact digest locally; installation never fetches a mutable copy.
+assert(capabilityManifest.schema_version === 1, "capability manifest schema mismatch");
+assert(capabilityManifest.catalog_schema_version === 1, "catalog schema mismatch");
+assert(capabilityManifest.renderer_version === 2, "catalog renderer mismatch");
+assert(capabilityManifest.capability_id === "integration-actions", "capability id mismatch");
 assert(
-  writeSkillNormalized.includes("`requires_confirmation` absent from the frontmatter") &&
-    writeSkillNormalized.includes("the outcome cannot be predicted") &&
-    writeSkillNormalized.includes("Never assume it will draft"),
+  capabilityManifest.artifact_path === "plugins/brains/skills/brains-write/SKILL.md",
+  "generated artifact path mismatch",
+);
+assert(
+  capabilityManifest.artifact_sha256 ===
+    createHash("sha256").update(writeSkill, "utf8").digest("hex"),
+  "generated brains-write artifact digest mismatch",
+);
+assert(
+  !/automation_secret|adminPool|handler_source|telegram_push|grant_token/.test(writeSkill),
+  "public skill leaked an internal-only capability",
+);
+
+// Keep independent semantic assertions: digest equality proves provenance, not
+// that the canonical source itself kept the load-bearing safety rules.
+assert(
+  writeSkillNormalized.includes("its `install_id`, `action_name`, and structured `input` in `act_on_integration`") &&
+    writeSkillNormalized.includes("this tuple is the only call shape"),
+  "structured action tuple missing",
+);
+assert(writeSkillNormalized.includes("call `get_page` on the selected"), "action discovery must resolve frontmatter");
+assert(
+  writeSkillNormalized.includes("`requires_confirmation` is absent") &&
+    writeSkillNormalized.includes("treat whether it drafts or runs as unknown"),
   "absent requires_confirmation must remain unknown rather than predict a draft",
 );
 assert(
-  writeSkillNormalized.includes('**`requires_confirmation: false`** → executes inline now, returns') &&
-    writeSkillNormalized.includes('{kind:"auto_executed", result, action_record_id}'),
-  "requires_confirmation:false must be documented as already executed",
+  writeSkillNormalized.includes("`requires_confirmation:true` drafts for out-of-band approval") &&
+    writeSkillNormalized.includes("`requires_confirmation:false` runs inline") &&
+    writeSkillNormalized.includes("| `auto_executed` | It already ran; it carries `result` and `action_record_id`."),
+  "both requires_confirmation branches must retain their distinct behavior",
+);
+assert(
+  writeSkillNormalized.includes("Partial tuples error") &&
+    writeSkillNormalized.includes("only bare legacy `source` returns `clarification`"),
+  "partial tuples must error; only the bare legacy source shim may clarify",
 );
 assert(writeSkillNormalized.includes("there is no source-enum fallback"), "legacy source-enum fallback must stay removed");
 assert(!writeSkillNormalized.includes("Fall back to the legacy source-enum"), "stale legacy fallback pointer must not return");
 assert(writeSkillNormalized.includes("action_record_id"), "auto-executed result must expose action_record_id");
 assert(!writeSkillNormalized.includes("audit_id"), "stale auto-executed audit_id field must not return");
 assert(
-  writeSkillNormalized.includes('**`kind:"rate_limited"`** → nothing ran and no upstream call was made'),
+  writeSkillNormalized.includes("| `rate_limited` | Nothing ran and no upstream call occurred."),
   "rate-limited actions must be documented as not attempted",
 );
+assert(
+  writeSkillNormalized.includes("30 auto-executions/install/60s"),
+  "auto-execution rate-limit context missing",
+);
+assert(writeSkillNormalized.includes("| `clarification` |"), "clarification result kind missing");
+assert(writeSkillNormalized.includes("| `noop` |"), "noop result kind missing");
 assert(
   writeSkillNormalized.includes("whether an outbound write reached the provider is **unknown**"),
   "auto-failed actions must preserve unknown-outcome guidance",
 );
-assert(writeSkillNormalized.includes("Never blind-retry"), "auto-failed external writes must not be blindly retried");
-assert(writeSkillNormalized.includes("The out-of-band surfaces hold the confirmation capability"), "approval boundary missing");
-assert(writeSkillNormalized.includes("Do **not** call `confirm_action`"), "agent self-confirm prohibition missing");
+assert(writeSkillNormalized.includes("Don't blind-retry"), "auto-failed external writes must not be blindly retried");
+assert(
+  writeSkillNormalized.includes("only `draft` carries `confirm_hint`") &&
+    writeSkillNormalized.includes("never say it is awaiting approval"),
+  "draft and auto-executed reporting gates must remain distinct",
+);
+assert(
+  writeSkillNormalized.includes("`dry_run` suppresses external writes to no-call `[DRY RUN]` drafts"),
+  "dry-run external-write suppression missing",
+);
+assert(writeSkill.endsWith("\n"), "generated public skill must end with a newline");
+assert(writeSkillNormalized.includes("out-of-band") && writeSkillNormalized.includes("confirmation secret"), "approval boundary missing");
+assert(writeSkillNormalized.includes("never call `confirm_action` yourself"), "agent self-confirm prohibition missing");
 assert(writeSkillNormalized.includes("call `discard_action`"), "agent-side draft discard path missing");
 assert(!writeSkillNormalized.includes("never call `discard_action`"), "draft discard guidance must remain actionable");
 assert(writeSkillNormalized.includes("remains approvable"), "expired drafts must not be described as inert");
-assert(writeSkillNormalized.includes("A bare `source` drafts nothing"), "source-only action fallback must stay prohibited");
+assert(writeSkillNormalized.includes("this tuple is the only call shape"), "source-only action fallback must stay prohibited");
 assert(!/act_on_integration[^.]{0,200}request=/.test(writeSkillNormalized), "free-form action request must not return");
 
 // This README is the install instructions for anyone who finds the repo directly rather than the
