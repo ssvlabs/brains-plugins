@@ -8,6 +8,20 @@ import { join, resolve } from "node:path";
 const ROOT = resolve(import.meta.dir, "..", "..");
 const PLUGIN = join(ROOT, "plugins", "brains");
 
+// The scope set the Codex MCP server requests at login, and the complete set of keys its
+// declaration may carry. Both are pinned because Codex IGNORES keys it does not recognise rather
+// than rejecting them: a misspelled `scope` would be dropped silently and the login would fall
+// back to requesting every scope the server advertises. Codex does not echo `scopes` back through
+// `mcp list` / `mcp get`, so an allow-list on this side is the only defence against a typo.
+const CODEX_MCP_SCOPES = ["read", "write"];
+const CODEX_MCP_KEYS = ["type", "url", "scopes"];
+
+// The oldest Codex that can run this install, and the command that proves it. The floor is set by
+// the `codex plugin` command surface — `codex mcp login` shipped much earlier, so probing the login
+// would pass on versions that then fail at `codex plugin marketplace add`.
+const CODEX_MIN_VERSION = "0.131";
+const CODEX_CAPABILITY_PROBE = "codex plugin --help";
+
 class AssertionError extends Error {}
 
 function readJson(path: string): any {
@@ -42,6 +56,7 @@ const claudeHooks = readJson(join(PLUGIN, "hooks", "claude-hooks.json"));
 const codexHooks = readJson(join(PLUGIN, "hooks", "hooks.json"));
 const codexMcp = readJson(join(PLUGIN, ".mcp.json"));
 const turnHook = readFileSync(join(PLUGIN, "hooks", "brains-turn.sh"), "utf8");
+const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 const core = readFileSync(join(PLUGIN, "core.md"), "utf8");
 const writeSkill = readFileSync(join(PLUGIN, "skills", "brains-write", "SKILL.md"), "utf8");
 const coreNormalized = core.replace(/\s+/g, " ");
@@ -58,7 +73,15 @@ assert(!("hooks" in codexManifest), "Codex should discover the default hooks/hoo
 assert(claudeMarketplace.plugins[0]?.source === "./plugins/brains", "Claude marketplace source mismatch");
 assert(codexMarketplace.plugins[0]?.source?.path === "./plugins/brains", "Codex marketplace source mismatch");
 assert(codexMarketplace.plugins[0]?.policy?.installation === "AVAILABLE", "Codex install policy missing");
-assert(codexMarketplace.plugins[0]?.policy?.authentication === "ON_INSTALL", "Codex auth policy missing");
+// Codex authenticates the MCP server on first use (`codex mcp login brains`), not during
+// `plugin add` — its plugin manifest has no field that could carry a credential at install time.
+//
+// Do NOT flip this back to ON_INSTALL on the observation that the desktop app kicks off a login
+// during install: it does (its app-server install handlers start an OAuth login per declared
+// server), but the install COMPLETES either way and the CLI performs no login at all, so ON_INSTALL
+// would misdescribe the contract this repo documents. The startup auto-update path does not do it,
+// which is why a plugin already installed stays logged out until someone runs the login.
+assert(codexMarketplace.plugins[0]?.policy?.authentication === "ON_USE", "Codex auth policy must be ON_USE");
 
 const claudeEvents = Object.keys(claudeHooks.hooks).sort();
 const codexEvents = Object.keys(codexHooks.hooks).sort();
@@ -86,9 +109,92 @@ for (const command of hookScripts(codexHooks)) {
   );
 }
 
+// One file, one key, one server. The per-key allow-list below guards what the `brains` entry may
+// declare; these two guard the file around it, so a second server — including a stdio `command`
+// server, which Codex would launch on the user's machine — cannot ride along unnoticed.
+assert(
+  JSON.stringify(Object.keys(codexMcp)) === JSON.stringify(["mcpServers"]),
+  `Codex MCP file may only contain mcpServers — got ${Object.keys(codexMcp).join(", ")}`,
+);
+assert(
+  JSON.stringify(Object.keys(codexMcp.mcpServers ?? {})) === JSON.stringify(["brains"]),
+  `Codex MCP file may only declare the brains server — got ${Object.keys(codexMcp.mcpServers ?? {}).join(", ")}`,
+);
+
 assert(codexMcp.mcpServers?.brains?.type === "http", "Codex brains MCP must be HTTP");
 assert(codexMcp.mcpServers?.brains?.url === "https://mcp.mybrains.ai/mcp", "Codex brains MCP URL mismatch");
-assert(codexMcp.mcpServers?.brains?.bearer_token_env_var === "BRAINS_API_TOKEN", "Codex token env mismatch");
+
+// Codex owns the MCP credential via its own OAuth login. `bearer_token_env_var` must stay ABSENT:
+// Codex reads that variable from its own process environment at server start and fails hard when
+// it is missing, and its presence also switches the OAuth path off entirely — so declaring it
+// would both break a plugin install (nothing can set the variable) and block `codex mcp login`.
+assert(
+  !("bearer_token_env_var" in (codexMcp.mcpServers?.brains ?? {})),
+  "Codex brains MCP must not declare bearer_token_env_var — it disables the OAuth login path",
+);
+// The scope set requested at login. Baked rather than discovered: with no `scopes` key Codex asks
+// for every scope the server advertises, which would mint an admin-carrying token for every user.
+assert(
+  JSON.stringify(codexMcp.mcpServers?.brains?.scopes) === JSON.stringify(CODEX_MCP_SCOPES),
+  `Codex brains MCP scopes must be ${JSON.stringify(CODEX_MCP_SCOPES)}`,
+);
+assert(
+  JSON.stringify(Object.keys(codexMcp.mcpServers?.brains ?? {}).sort())
+    === JSON.stringify([...CODEX_MCP_KEYS].sort()),
+  `Codex brains MCP may only declare ${CODEX_MCP_KEYS.join(", ")} — got ${Object.keys(codexMcp.mcpServers?.brains ?? {}).join(", ")}`,
+);
+
+// Ask a real Codex what it made of the declaration, rather than trusting that the file we wrote is
+// the config Codex resolved. This is what catches an upstream change that stops honouring the
+// plugin MCP shape: the keys above could all be correct and the server still fail to resolve, or
+// resolve onto the bearer path. Skipped with a visible note when Codex is not installed.
+const codexOnPath = spawnSync("codex", ["--version"], { encoding: "utf8" }).status === 0;
+if (!codexOnPath) {
+  console.log("plugin contract: SKIP resolved-config check (codex not on PATH)");
+} else {
+  const home = mkdtempSync(join(tmpdir(), "brains-plugin-contract-codex-"));
+  try {
+    const codex = (args: string[]) =>
+      spawnSync("codex", args, { encoding: "utf8", env: { ...process.env, CODEX_HOME: home } });
+    const added = codex(["plugin", "marketplace", "add", ROOT]);
+    assert(added.status === 0, `codex plugin marketplace add failed: ${added.stderr}`);
+    const installed = codex(["plugin", "add", "brains@brains"]);
+    assert(installed.status === 0, `codex plugin add failed: ${installed.stderr}`);
+
+    const listed = codex(["mcp", "list", "--json"]);
+    assert(listed.status === 0, `codex mcp list --json failed: ${listed.stderr}`);
+    const servers = JSON.parse(listed.stdout);
+    // Assert the whole resolved set, not just that ours is in it — selecting `brains` out of a
+    // longer list would hide a sibling the plugin had quietly introduced.
+    assert(
+      JSON.stringify(servers.map((s: any) => s.name)) === JSON.stringify(["brains"]),
+      `codex must resolve exactly one server named brains — got ${servers.map((s: any) => s.name).join(", ") || "none"}`,
+    );
+    const resolved = servers[0];
+    assert(resolved.enabled === true, "resolved brains MCP server must be enabled");
+    assert(
+      resolved.transport?.type === "streamable_http",
+      `resolved transport must be streamable_http, got ${resolved.transport?.type}`,
+    );
+    assert(
+      resolved.transport?.url === codexMcp.mcpServers.brains.url,
+      "resolved transport URL must match the declaration",
+    );
+    assert(
+      resolved.transport?.bearer_token_env_var === null,
+      "resolved transport must carry no bearer token env var",
+    );
+    // Not logged in yet, and Codex says so rather than claiming a credential it does not have —
+    // which is the whole point of dropping the bearer declaration.
+    assert(
+      resolved.auth_status === "not_logged_in",
+      `resolved auth status must be not_logged_in, got ${resolved.auth_status}`,
+    );
+    console.log("plugin contract: resolved-config check OK (codex resolved the plugin declaration)");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+}
 
 assert(core.includes("<!-- brains:core:start v=5 -->"), "core marker must be v5");
 for (const signal of [
@@ -147,6 +253,46 @@ assert(!writeSkillNormalized.includes("never call `discard_action`"), "draft dis
 assert(writeSkillNormalized.includes("remains approvable"), "expired drafts must not be described as inert");
 assert(writeSkillNormalized.includes("A bare `source` drafts nothing"), "source-only action fallback must stay prohibited");
 assert(!/act_on_integration[^.]{0,200}request=/.test(writeSkillNormalized), "free-form action request must not return");
+
+// This README is the install instructions for anyone who finds the repo directly rather than the
+// guided page, so it has to carry the same contract. It documented `export BRAINS_API_TOKEN` as the
+// way in long after that stopped being able to work, which is exactly the drift these pin.
+// Resolve both delimiters before slicing. A missing end heading yields -1, and
+// `slice(start, -1)` would silently widen the region to almost the whole file —
+// every assertion below would then pass while reading the wrong section.
+const codexStart = readme.indexOf("## Install for Codex");
+const claudeStart = readme.indexOf("## Install for Claude Code");
+assert(codexStart >= 0, "README must document a Codex install");
+assert(claudeStart >= 0, "README must document a Claude Code install");
+assert(
+  claudeStart > codexStart,
+  "README's Claude Code section must follow the Codex one — the Codex checks below slice between them",
+);
+const codexReadme = readme.slice(codexStart, claudeStart);
+assert(
+  codexReadme.includes("codex mcp login brains"),
+  "README's Codex install must sign Codex in with `codex mcp login brains`",
+);
+assert(
+  codexReadme.includes(CODEX_MIN_VERSION) && codexReadme.includes(CODEX_CAPABILITY_PROBE),
+  `README's Codex install must state the ${CODEX_MIN_VERSION} floor and the \`${CODEX_CAPABILITY_PROBE}\` check`,
+);
+// The token is still documented, but only under the optional capture/inbox heading — never in the
+// install sequence itself. Anything above that heading claiming a token is how you get in is the
+// regression this catches.
+const optionalHeadingIndex = codexReadme.indexOf("### Optional");
+assert(optionalHeadingIndex > 0, "README must keep the optional capture/inbox section for Codex");
+const codexPrerequisites = codexReadme.slice(0, optionalHeadingIndex);
+for (const forbidden of ["BRAINS_API_TOKEN", "launchctl setenv"]) {
+  assert(
+    !codexPrerequisites.includes(forbidden),
+    `README must not present \`${forbidden}\` as a Codex install prerequisite — it belongs under the optional capture/inbox section`,
+  );
+}
+assert(
+  codexReadme.slice(optionalHeadingIndex).includes("launchctl setenv"),
+  "README's optional section must keep the desktop launchctl path — a desktop app inherits no shell export",
+);
 
 assert(
   turnHook.includes('CLIENT="claude"'),
@@ -242,6 +388,48 @@ try {
   assert(assistantPayloads[0].role === "assistant", "Codex Stop payload must use the assistant role");
   assert(assistantPayloads[0].client === "codex", "Codex Stop payload must identify Codex");
   assert(assistantPayloads[0].content === "hello from codex", "Codex Stop payload must preserve the response");
+
+  // Conversation capture and the inbox are OPT-IN: the MCP server authenticates itself, so a user
+  // who never sets a token still gets a working plugin. Both hooks must therefore no-op silently
+  // when no credential resolves — exit 0, no output, no request — rather than erroring or hanging.
+  // `codexless` shadows `codex` with a failing stub so the turn hook's config scavenge finds
+  // nothing, which is the state of a plugin install that has only ever done `codex mcp login`.
+  const codexless = join(temp, "codexless");
+  mkdirSync(codexless);
+  writeFileSync(join(codexless, "codex"), "#!/bin/sh\nexit 1\n");
+  chmodSync(join(codexless, "codex"), 0o755);
+  const noTokenCapture = join(temp, "no-token-payloads.jsonl");
+  const noTokenEnv = {
+    ...process.env,
+    PATH: `${codexless}:${bin}:${process.env.PATH ?? ""}`,
+    PLUGIN_ROOT: PLUGIN,
+    BRAINS_API_TOKEN: "",
+    BRAINS_INBOX_TOKEN: "",
+    CLAUDE_PLUGIN_OPTION_TOKEN: "",
+    BRAINS_STATE_DIR: join(temp, "state-no-token"),
+    CAPTURE_FILE: noTokenCapture,
+  };
+  const turnNoToken = spawnSync("bash", [join(PLUGIN, "hooks", "brains-turn.sh")], {
+    input: JSON.stringify({ session_id: "codex-session", prompt: "hello" }),
+    env: noTokenEnv,
+  });
+  assert(turnNoToken.status === 0, "turn hook must exit 0 with no token available");
+  assert(
+    turnNoToken.stdout.toString() === "" && turnNoToken.stderr.toString() === "",
+    "turn hook must stay silent with no token available",
+  );
+  assert(!existsSync(noTokenCapture), "turn hook must not POST anything with no token available");
+
+  const inboxNoToken = spawnSync(
+    "bash",
+    [join(PLUGIN, "hooks", "lib", "brains-inbox.sh"), "startup", "codex-session"],
+    { env: noTokenEnv },
+  );
+  assert(inboxNoToken.status === 0, "inbox engine must exit 0 with no token available");
+  assert(
+    inboxNoToken.stdout.toString() === "" && inboxNoToken.stderr.toString() === "",
+    "inbox engine must stay silent with no token available",
+  );
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }
