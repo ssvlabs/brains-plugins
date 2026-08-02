@@ -1,11 +1,22 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "catalog_schema_version": 1,
-  "renderer_version": 2,
-  "capability_id": "integration-actions",
+  "renderer_version": 3,
   "source_repository": "https://github.com/ssvlabs/brains",
   "source_generator": "apps/mcp/scripts/generate-capability-catalog.ts",
-  "catalog_sha256": "c46b9cf2f88ed3cefe0f5766665c12f06dafaa0e56dba1f5586ab9cd56c39ac2",
-  "artifact_path": "plugins/brains/skills/brains-write/SKILL.md",
-  "artifact_sha256": "f14839e4ed852771fc8dd91b0196f9caeeb63ce56dead747a53d83fd83dd9475"
+  "artifacts": [
+    {
+      "capability_id": "integration-actions",
+      "catalog_sha256": "c46b9cf2f88ed3cefe0f5766665c12f06dafaa0e56dba1f5586ab9cd56c39ac2",
+      "artifact_path": "plugins/brains/skills/brains-write/SKILL.md",
+      "artifact_sha256": "f14839e4ed852771fc8dd91b0196f9caeeb63ce56dead747a53d83fd83dd9475"
+    },
+    {
+      "capability_id": "brains-features",
+      "catalog_sha256": "03c153311f597a651c9719dc17229e6677b4c2b2823458b0b50c12617146a5bd",
+      "artifact_path": "plugins/brains/skills/brains-build/SKILL.md",
+      "artifact_sha256": "8e377f866efdbf6653cda64fcc44cef6a8038e1d74dfd2311af4a0ded434c237"
+    }
+  ],
+  "source_commit": "9888bc944d0a3e5d2c178eaaf8b23811364457d9"
 }
