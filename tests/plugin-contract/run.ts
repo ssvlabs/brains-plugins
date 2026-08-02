@@ -209,12 +209,13 @@ assert(codexMcp.mcpServers?.brains?.type === "http", "Codex brains MCP must be H
 assert(codexMcp.mcpServers?.brains?.url === "https://mcp.mybrains.ai/mcp", "Codex brains MCP URL mismatch");
 
 // Codex owns the MCP credential via its own OAuth login. `bearer_token_env_var` must stay ABSENT:
-// Codex reads that variable from its own process environment at server start and fails hard when
-// it is missing, and its presence also switches the OAuth path off entirely — so declaring it
-// would both break a plugin install (nothing can set the variable) and block `codex mcp login`.
+// the plugin ships nothing that sets the variable, and neither state helps. Unset, Codex silently
+// drops the server at session start rather than falling back to the stored credential, so even a
+// successful `codex mcp login` leaves it unusable. Where a shell exports the variable, that bearer
+// is what Codex sends at request time, shadowing the stored credential.
 assert(
   !("bearer_token_env_var" in (codexMcp.mcpServers?.brains ?? {})),
-  "Codex brains MCP must not declare bearer_token_env_var — it disables the OAuth login path",
+  "Codex brains MCP must not declare bearer_token_env_var — unset, Codex drops the server; set, it shadows the OAuth credential",
 );
 // The scope set requested at login. Baked rather than discovered: with no `scopes` key Codex asks
 // for every scope the server advertises, which would mint an admin-carrying token for every user.
