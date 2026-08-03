@@ -9,13 +9,18 @@
 #      one here is editing a build output — the next regeneration silently
 #      reverts it, and until then the published skill disagrees with the server
 #      that produced it. The contract test already digest-pins each artifact, so
-#      a LONE edit fails there; this guard adds the case where someone edits the
-#      artifact and refreshes the digest to match, which would otherwise pass.
+#      a LONE edit fails there. An edit WITH the digest refreshed to match clears
+#      the contract test, and this guard catches it only through rule 2 below —
+#      unbumped, it fails as undelivered. Bump alongside it and it passes: the
+#      coordinated case the LIMIT below admits.
 #
-#   2. A CHANGE THAT REACHES NOBODY. A skill ships to users only when the plugin
-#      version INCREASES — hosts update on version precedence, not on content. A
-#      PR that edits a published artifact without a real bump delivers to zero
-#      users while looking merged and done.
+#   2. A CHANGE THAT REACHES NOBODY. Plugin content ships to users only when the
+#      plugin version INCREASES — hosts update on version precedence, not on
+#      content. A PR that edits published content without a real bump delivers to
+#      zero users while looking merged and done. "Published" is the whole
+#      plugins/brains/ tree, not just the generated artifacts: scoping the trigger
+#      to artifact-or-catalog let a hand-authored SKILL.md, core.md, the hooks and
+#      .mcp.json through unbumped, and that is most of what ships.
 #
 # Usage:  scripts/generated-artifact-guard.sh [base-ref]     (default origin/main)
 #
@@ -119,6 +124,14 @@ fi
 
 # -------------------------------------------------------------------- delivery
 
+# Everything under plugins/brains/ ships — skills, core.md, hooks, .mcp.json — so
+# delivery watches the whole tree. Watching only the generated artifacts and their
+# catalog let a hand-authored SKILL.md edit merge with no bump and reach nobody.
+# Both plugin manifests live under this prefix, so a version-only release bump
+# trips this trigger and then satisfies it: no deadlock.
+published_changed=false
+if changed "plugins/brains"; then published_changed=true; fi
+
 # SemVer PRECEDENCE, not inequality. `!=` accepted a downgrade (2.6.0 -> 2.5.1)
 # and a build-metadata-only edit (2.6.0 -> 2.6.0+build.1) — both of which leave
 # hosts on the old version, which is the reaches-nobody bug this rule exists for.
@@ -176,7 +189,7 @@ read_version() {
   '
 }
 
-if [ "$artifact_changed" = true ] || [ "$manifest_changed" = true ]; then
+if [ "$artifact_changed" = true ] || [ "$manifest_changed" = true ] || [ "$published_changed" = true ]; then
   for manifest in "$CLAUDE_MANIFEST" "$CODEX_MANIFEST"; do
     base_version="$(git show "$BASE_REF:$manifest" | read_version)"
     head_version="$(read_version < "$manifest")"
