@@ -2,7 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -142,6 +142,7 @@ const inboxHook = readFileSync(join(PLUGIN, "hooks", "lib", "brains-inbox.sh"), 
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 const core = readFileSync(join(PLUGIN, "core.md"), "utf8");
 const writeSkill = readFileSync(join(PLUGIN, "skills", "brains-write", "SKILL.md"), "utf8");
+const buildSkill = readFileSync(join(PLUGIN, "skills", "brains-build", "SKILL.md"), "utf8");
 const capabilityManifest = readJson(join(PLUGIN, "generated", "capability-catalog.json"));
 const coreNormalized = core.replace(/\s+/g, " ");
 const writeSkillNormalized = writeSkill.replace(/\s+/g, " ");
@@ -443,23 +444,109 @@ assert(core.length < 3_000, "always-loaded core must stay below 3,000 characters
 
 // The public face is generated from the monorepo capability catalog. Verify its
 // immutable artifact digest locally; installation never fetches a mutable copy.
-assert(capabilityManifest.schema_version === 1, "capability manifest schema mismatch");
+assert(capabilityManifest.schema_version === 2, "capability manifest schema mismatch");
 assert(capabilityManifest.catalog_schema_version === 1, "catalog schema mismatch");
-assert(capabilityManifest.renderer_version === 2, "catalog renderer mismatch");
-assert(capabilityManifest.capability_id === "integration-actions", "capability id mismatch");
+assert(capabilityManifest.renderer_version === 3, "catalog renderer mismatch");
+
+// Provenance: the monorepo stamps the commit that rendered these bytes onto the
+// PUBLISHED manifest only (its in-repo twin omits it, so its own --check stays
+// stable). We can't verify the commit exists — that repo is private — but we can
+// refuse a malformed or absent claim, which is what makes the value reviewable.
 assert(
-  capabilityManifest.artifact_path === "plugins/brains/skills/brains-write/SKILL.md",
-  "generated artifact path mismatch",
+  typeof capabilityManifest.source_commit === "string" &&
+    /^[0-9a-f]{40}$/.test(capabilityManifest.source_commit),
+  "published manifest must carry a 40-hex source_commit",
 );
 assert(
-  capabilityManifest.artifact_sha256 ===
-    createHash("sha256").update(writeSkill, "utf8").digest("hex"),
-  "generated brains-write artifact digest mismatch",
+  capabilityManifest.source_repository === "https://github.com/ssvlabs/brains",
+  "source repository mismatch",
 );
+
+// Multi-artifact loop. Every published artifact is digest-pinned and carries the
+// generated header, so a lone hand edit cannot merge. This walks the manifest
+// rather than pinning one entry, so a third artifact is covered the day it lands.
+const LOCAL_ARTIFACT: Record<string, string> = {
+  "plugins/brains/skills/brains-write/SKILL.md": writeSkill,
+  "plugins/brains/skills/brains-build/SKILL.md": buildSkill,
+};
+assert(Array.isArray(capabilityManifest.artifacts), "manifest must carry an artifacts array");
 assert(
-  !/automation_secret|adminPool|handler_source|telegram_push|grant_token/.test(writeSkill),
-  "public skill leaked an internal-only capability",
+  capabilityManifest.artifacts.map((a: any) => a.capability_id).sort().join(",") ===
+    "brains-features,integration-actions",
+  "published capability set mismatch",
 );
+for (const entry of capabilityManifest.artifacts) {
+  const body = LOCAL_ARTIFACT[entry.artifact_path];
+  assert(body !== undefined, `manifest names an unknown artifact: ${entry.artifact_path}`);
+  assert(
+    entry.artifact_sha256 === createHash("sha256").update(body!, "utf8").digest("hex"),
+    `generated artifact digest mismatch: ${entry.artifact_path}`,
+  );
+  assert(/^[0-9a-f]{64}$/.test(entry.catalog_sha256), `catalog digest malformed: ${entry.artifact_path}`);
+  assert(
+    body!.includes("Do not hand-edit"),
+    `generated artifact is missing its do-not-hand-edit header: ${entry.artifact_path}`,
+  );
+  assert(
+    !/automation_secret|adminPool|handler_source|telegram_push|grant_token/.test(body!),
+    `public skill leaked an internal-only capability: ${entry.artifact_path}`,
+  );
+}
+
+// Eager skill-metadata budget (skills authoring & discovery contract §3): the
+// CLI hosts preload EVERY installed skill's name + description for routing, so
+// skill count is a budget, not a detail. Education was deliberately rendered
+// INTO brains-build rather than added as an eighth skill; pin the count so a
+// future addition is a reviewed act, not a silent one.
+const skillDirs = readdirSync(join(PLUGIN, "skills"), { withFileTypes: true })
+  .filter((e) => e.isDirectory())
+  .map((e) => e.name)
+  .sort();
+assert(
+  skillDirs.join(",") ===
+    "brains-agenda,brains-build,brains-feedback,brains-integrations,brains-nudges,brains-read,brains-write",
+  `skill set changed (${skillDirs.join(", ")}) — see the eager-budget rule before adding one`,
+);
+
+// Cross-skill trigger disjointness (§1: triggers must be mutually distinct).
+// This lives HERE and not in the monorepo generator on purpose: the sibling
+// SKILL.md bodies exist only in this repo, so an assertion there would have no
+// inputs and pass forever. brains-build's rendered description samples authored
+// trigger phrases verbatim; none may be claimed by another skill's description.
+const SAMPLED_TRIGGERS = ["track a list of", "every morning do", "build me a deck"];
+const buildDescription = /^description:\s*(.+)$/m.exec(buildSkill)?.[1] ?? "";
+for (const trigger of SAMPLED_TRIGGERS) {
+  assert(
+    buildDescription.toLowerCase().includes(trigger),
+    `brains-build no longer samples the trigger "${trigger}" — regenerate from the monorepo catalog`,
+  );
+  for (const dir of skillDirs) {
+    if (dir === "brains-build") continue;
+    const sibling = readFileSync(join(PLUGIN, "skills", dir, "SKILL.md"), "utf8");
+    const siblingDescription = /^description:\s*(.+)$/m.exec(sibling)?.[1] ?? "";
+    assert(
+      !siblingDescription.toLowerCase().includes(trigger),
+      `trigger "${trigger}" is claimed by both brains-build and ${dir} — routing collision`,
+    );
+  }
+}
+
+// brains-build is the education face: it must POINT, not restate. It routes to
+// owners and must not carry another skill's procedure vocabulary.
+assert(
+  !/one question per turn/i.test(buildSkill),
+  "brains-build restates a *_flow playbook procedure it should only point at",
+);
+
+// No skill may name a tool the monorepo registry does not have. This is the
+// class of bug that shipped `get_overnight_digest` in two skills for months.
+for (const dir of skillDirs) {
+  const body = readFileSync(join(PLUGIN, "skills", dir, "SKILL.md"), "utf8");
+  assert(
+    !/get_overnight_digest|create_dataset_recipe|refresh_dataset_recipe/.test(body),
+    `${dir} names a tool that does not exist in the brains MCP registry`,
+  );
+}
 
 // Keep independent semantic assertions: digest equality proves provenance, not
 // that the canonical source itself kept the load-bearing safety rules.

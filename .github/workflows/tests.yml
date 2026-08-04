@@ -41,3 +41,30 @@ jobs:
         with:
           bun-version: "1.3.8"
       - run: bun run tests/tool-error/run.ts
+
+  generated-artifact-guard:
+    name: generated-artifact + delivery guard
+    runs-on: ubuntu-latest
+    # Only meaningful on a PR: it compares HEAD against the base branch. A push
+    # to main has nothing to compare against and would be a no-op.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The guard diffs against the PR base, so the default shallow clone
+          # (which has no base history) would make every comparison a no-op.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # base_ref goes through `env:` and every use is quoted. Interpolating
+      # `${{ github.base_ref }}` straight into `run:` splices the branch name into
+      # the shell before it runs, so a branch named e.g. `release/$USER` — or
+      # anything carrying shell metacharacters — changes which ref gets fetched
+      # and compared. The guard would then judge the wrong base and still say OK.
+      - run: git fetch --no-tags origin "$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+      - run: bash scripts/generated-artifact-guard.sh "origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
