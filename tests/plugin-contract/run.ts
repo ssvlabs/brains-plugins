@@ -39,6 +39,9 @@ const HOOK_ENV_ENDPOINT = "https://envvar-probe.example.test";
 const CLAUDE_LOOPBACK = "127.0.0.1";
 const CLAUDE_MCP_KEYS = ["type", "url"];
 const CLAUDE_OPTIONAL_HEADING = "### Optional:";
+const CLAUDE_WEB_HEADING = "## Install for claude.ai web";
+// The one URL a web reader needs; the connector dialog takes it verbatim.
+const CLAUDE_WEB_GUIDE = "https://app.mybrains.ai/install/claude-web";
 
 // Approved token copy, pinned verbatim. Hand-written phrasing checks proved both evadable and
 // prone to false positives, so the wording itself is the contract; the regex pair further down
@@ -715,15 +718,24 @@ assert(
   "README's optional section must keep the desktop launchctl path — a desktop app inherits no shell export",
 );
 
-// Same treatment for the Claude Code section, sliced between its own heading and the shared
-// layout section. Resolve the end delimiter first for the same reason as above.
+// Same treatment for the Claude Code section. It is sliced between its own heading and the
+// claude.ai web heading — NOT the shared layout section. The web section sits between the two,
+// and letting it fall inside this slice would subject it to the Claude-Code-specific rules below
+// (the version-floor bans, the `bash -n` sweep) while leaving its own claims unpinned. Resolve
+// both delimiters first, for the same reason as above.
 const sharedLayoutStart = readme.indexOf("## Shared layout");
-assert(sharedLayoutStart >= 0, "README must keep the shared layout section — it ends the Claude slice");
+const webStart = readme.indexOf(CLAUDE_WEB_HEADING);
+assert(sharedLayoutStart >= 0, "README must keep the shared layout section — it ends the web slice");
+assert(webStart >= 0, `README must document the claude.ai web install ("${CLAUDE_WEB_HEADING}")`);
 assert(
-  sharedLayoutStart > claudeStart,
-  "README's shared layout section must follow the Claude Code install — the checks below slice between them",
+  webStart > claudeStart,
+  "README's claude.ai web section must follow the Claude Code install — the checks below slice between them",
 );
-const claudeReadme = readme.slice(claudeStart, sharedLayoutStart);
+assert(
+  sharedLayoutStart > webStart,
+  "README's shared layout section must follow the claude.ai web install — the web checks slice between them",
+);
+const claudeReadme = readme.slice(claudeStart, webStart);
 // Pinned individually so a single dropped element names itself, ahead of the whole-region pin.
 for (const pinned of [
   "claude plugin marketplace add https://github.com/ssvlabs/brains-plugins.git",
@@ -785,6 +797,59 @@ assert(
 assert(
   claudeMigration.includes(CLAUDE_MCP_LOGIN),
   "README's Claude migration must sign in — updating alone leaves the user logged out",
+);
+
+// The claude.ai web section, sliced between its own heading and the shared layout section.
+//
+// This section exists because the rest of this README describes hook-driven capture, and a web
+// reader gets none of it: hooks are inert in claude.ai chat on BOTH install paths — the custom
+// connector and the full marketplace-sync plugin (support article 13837440). What replaces them
+// was measured live rather than assumed (BRNS-MCPWEB-018): an explicit "save this chat to brains"
+// works, while unprompted capture fired on ONE of five passive trials — including a trial that
+// announced a save it never performed. The assertions below pin that distinction, because the
+// tempting edit is to collapse the two into one reassuring sentence, and the whole finding is
+// that they are not the same promise.
+const webReadme = readme.slice(webStart, sharedLayoutStart);
+assert(
+  webReadme.includes(CLAUDE_WEB_GUIDE),
+  `README's web section must link the install guide (${CLAUDE_WEB_GUIDE}) — it owns the procedure and the instruction block, which must not be forked into this file`,
+);
+assert(
+  webReadme.includes(CLAUDE_MCP_URL),
+  `README's web section must name ${CLAUDE_MCP_URL} — it is what the connector dialog asks for`,
+);
+// Both install paths. Naming only the connector would strand paid users on the route that
+// carries the skills; naming only the plugin would exclude every Free-tier reader.
+for (const path of ["Custom connector", "Full plugin"]) {
+  assert(
+    webReadme.includes(path),
+    `README's web section must name both claude.ai install paths — missing: ${path}`,
+  );
+}
+assert(
+  webReadme.includes("save_chat_session"),
+  "README's web section must name save_chat_session — it is the only capture path on claude.ai",
+);
+// The measured shape, in both directions. Dropping either half re-creates the bug this ticket
+// fixed: without the explicit path the section reads as "capture is broken", and without the
+// unreliability caveat it reads as "capture just works".
+assert(
+  /save this chat to brains/i.test(webReadme),
+  "README's web section must give the user the explicit phrasing that actually works",
+);
+assert(
+  /only sometimes/i.test(webReadme),
+  "README's web section must keep unprompted capture marked unreliable — it fired on one of five measured passive trials",
+);
+assert(
+  /list_pages type=chat_session|which chats it\s+has/i.test(webReadme),
+  "README's web section must tell the user how to VERIFY a save — a model has been observed claiming a save it did not perform",
+);
+// The regression that would pass every check above: re-asserting hook-driven capture on the one
+// surface whose whole purpose is to say the hooks are absent.
+assert(
+  !/\bcapture is automatic\b/i.test(webReadme),
+  "README's web section must not claim automatic capture — no hooks run on claude.ai, on either install path",
 );
 
 assert(

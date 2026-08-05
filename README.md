@@ -163,6 +163,30 @@ Codex has no such option and runs the same hook scripts, so set `BRAINS_ENDPOINT
 you set `BRAINS_API_TOKEN` above — the shell Codex starts from, or the app's launch
 environment. Without it Codex capture keeps sending to `https://mcp.mybrains.ai` too.
 
+## Install for claude.ai web
+
+claude.ai does not run this repo's hooks, so the capture that Codex and Claude
+Code get from `hooks/` does not happen there. Two ways in, both covered step by
+step at <https://app.mybrains.ai/install/claude-web>:
+
+- **Custom connector** — add `https://mcp.mybrains.ai/mcp` and approve the OAuth
+  screen. Works on any plan.
+- **Full plugin** — add this repository as a marketplace and install from it.
+  Paid plans only; it also brings the skills. The hooks it lists stay inert.
+
+Recall works on both: ask about a person, project or past conversation and
+Claude reaches for brains on its own.
+
+**Capture is different — ask for it.** On claude.ai a conversation is saved only
+when Claude calls `save_chat_session`. Say "save this chat to brains" and it
+does; that is the dependable way, and the way to treat anything you want kept.
+
+With the install guide's instruction block in place Claude also saves on its own
+sometimes — but only sometimes, and in testing it once said it was saving
+without actually doing so. Don't rely on it, and don't take the sentence in the
+chat as proof: `list_pages type=chat_session`, or just ask brains which chats it
+has, is the only real confirmation.
+
 ## Shared layout
 
 - `.agents/plugins/marketplace.json` — Codex marketplace
