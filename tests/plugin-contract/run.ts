@@ -476,7 +476,7 @@ if (!claudeOnPath) {
   }
 }
 
-assert(core.includes("<!-- brains:core:start v=5 -->"), "core marker must be v5");
+assert(core.includes("<!-- brains:core:start v=6 -->"), "core marker must be v6");
 for (const signal of [
   "Query brains reflexively",
   "list_calendar_events",
@@ -492,9 +492,20 @@ for (const signal of [
   "note the error and what you were doing",
   "Do not attach it to unrelated later feedback",
   "Once per session, when natural, mention `brains-feedback`",
+  // The capture rule must stay CLIENT-SCOPED. Nothing pinned it before, which is how
+  // "Capture is automatic … You do not need to call save_chat_session" survived here
+  // unqualified while being false anywhere the hooks don't run — claude.ai web runs
+  // none of them, on either install path (BRNS-MCPWEB-018).
+  "nothing is captured unless you call",
 ]) {
   assert(coreNormalized.includes(signal), `compact core is missing routing/delegation signal: ${signal}`);
 }
+// Backstop for a rewrite that edits the signal above too: the unconditional claim is the
+// one that must never return, in any paraphrase that drops the client scoping.
+assert(
+  !/capture is automatic/i.test(core),
+  "core must not claim capture is automatic — it is hook-driven, and no hooks run on claude.ai web",
+);
 assert(core.length < 3_000, "always-loaded core must stay below 3,000 characters");
 
 // The public face is generated from the monorepo capability catalog. Verify its
