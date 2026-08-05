@@ -1,8 +1,10 @@
 # brains — Codex and Claude Code plugin
 
 Your memory layer for Codex and Claude Code: Gmail, Calendar, Drive, and prior
-AI conversations as queryable pages — with reflexive recall, turn-by-turn
-capture, a server-driven inbox, boards, automations, and workflows on top.
+AI conversations as queryable pages — with reflexive recall, hook-driven
+turn-by-turn capture, a server-driven inbox, boards, automations, and workflows
+on top. The same server also backs claude.ai, where no hooks run — see
+[Install for claude.ai web](#install-for-claudeai-web).
 
 The Codex and Claude packages share the same seven skills, core prompt, hook
 scripts, and inbox engine. Only their manifests, hook event maps, and MCP

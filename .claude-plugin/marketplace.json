@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "brains",
-      "description": "Your memory layer: Gmail/Calendar/Drive and prior Claude conversations as queryable pages — reflexive recall, turn-by-turn capture, a server-driven inbox, and boards/automations/workflows on top.",
+      "description": "Your memory layer: Gmail/Calendar/Drive and prior Claude conversations as queryable pages — reflexive recall, hook-driven turn-by-turn capture, a server-driven inbox, and boards/automations/workflows on top.",
       "source": "./plugins/brains",
       "category": "productivity"
     }
