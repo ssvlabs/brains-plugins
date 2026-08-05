@@ -1,7 +1,7 @@
 {
   "name": "brains",
   "description": "Your memory layer: Gmail, Calendar, Drive, and prior Claude conversations as queryable pages, with reflexive recall, turn-by-turn capture, a server-driven inbox, and boards/automations/workflows on top.",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "author": {
     "name": "brains (ssvlabs)"
   },
@@ -18,14 +18,14 @@
     "endpoint": {
       "type": "string",
       "title": "brains endpoint",
-      "description": "Base URL of your brains server (no trailing slash). The plugin derives /mcp, /ingest/claude, and /inbox/claude from it.",
+      "description": "Base URL of your brains server (no trailing slash). Conversation capture and the inbox derive /ingest/claude and /inbox/claude from it. The brains tools connect to https://mcp.mybrains.ai/mcp regardless of this setting.",
       "default": "https://mcp.mybrains.ai"
     }
   },
   "mcpServers": {
     "brains": {
       "type": "http",
-      "url": "${user_config.endpoint}/mcp"
+      "url": "https://mcp.mybrains.ai/mcp"
     }
   }
 }

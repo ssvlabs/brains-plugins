@@ -139,6 +139,28 @@ claude mcp login plugin:brains:brains
 
 Then run `/reload-plugins`.
 
+### Self-hosting
+
+The brains tools connect to `https://mcp.mybrains.ai/mcp`; to point them at your own
+server, fork this repo, set the URL in `plugins/brains/.claude-plugin/plugin.json` and
+`plugins/brains/.mcp.json`, and add your fork as the marketplace.
+
+That moves the tools only. Conversation capture and the inbox read the `endpoint` option
+instead, so set it when you install or they keep sending to `https://mcp.mybrains.ai`:
+
+```sh
+claude plugin install brains@brains --config endpoint=https://your-server
+```
+
+Changing `endpoint`'s `default` in your fork does not cover this. Claude Code exports
+`CLAUDE_PLUGIN_OPTION_ENDPOINT` to the hooks from the value stored in your settings, and
+an option you never set has no stored value — so the hooks fall back to
+`https://mcp.mybrains.ai` while your tools talk to your own server.
+
+Codex has no such option and runs the same hook scripts, so set `BRAINS_ENDPOINT` wherever
+you set `BRAINS_API_TOKEN` above — the shell Codex starts from, or the app's launch
+environment. Without it Codex capture keeps sending to `https://mcp.mybrains.ai` too.
+
 ## Shared layout
 
 - `.agents/plugins/marketplace.json` — Codex marketplace
