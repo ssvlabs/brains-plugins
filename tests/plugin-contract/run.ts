@@ -27,8 +27,15 @@ const CODEX_CAPABILITY_PROBE = "codex plugin --help";
 // the manifest copy, the README and the drift nudge must all name it WITH its plugin-scoped
 // argument. A bare `claude mcp login` is unusable — the CLI requires the server name.
 const CLAUDE_MCP_LOGIN = "claude mcp login plugin:brains:brains";
-const CLAUDE_MCP_URL = "${user_config.endpoint}/mcp";
+const CLAUDE_MCP_URL = "https://mcp.mybrains.ai/mcp";
 const CLAUDE_ENDPOINT = "https://mcp.mybrains.ai";
+// Stands in for a user's own brains server in the hook-endpoint check at the bottom of this file.
+// A `.test` host can never resolve, so if the fake curl there ever stopped intercepting, the check
+// would fail rather than quietly reach something real.
+const CLAUDE_SELF_HOSTED = "https://self.example.test";
+// The middle branch of the hooks' BASE chain — BRAINS_ENDPOINT — which is the only lever a
+// self-hosting Codex user has, since Codex has no userConfig mechanism at all.
+const HOOK_ENV_ENDPOINT = "https://envvar-probe.example.test";
 const CLAUDE_LOOPBACK = "127.0.0.1";
 const CLAUDE_MCP_KEYS = ["type", "url"];
 const CLAUDE_OPTIONAL_HEADING = "### Optional:";
@@ -42,6 +49,15 @@ const CLAUDE_TOKEN_DESCRIPTION =
   "MCP server. NOT how the brains tools authenticate — that is `claude mcp login " +
   "plugin:brains:brains`. Find it in your brains account settings; without one, capture and the " +
   "inbox simply stay off.";
+
+// Approved endpoint copy, pinned for the same reason and against a specific regression: this text
+// used to promise that /mcp derived from the endpoint, and it would have gone on saying so after
+// that stopped being true. Pinning it forces the copy to move whenever the derivation does — it now
+// has to name which halves the setting still governs, and admit which one it does not.
+const CLAUDE_ENDPOINT_DESCRIPTION =
+  "Base URL of your brains server (no trailing slash). Conversation capture and the inbox derive " +
+  "/ingest/claude and /inbox/claude from it. The brains tools connect to " +
+  "https://mcp.mybrains.ai/mcp regardless of this setting.";
 
 // Approved README copy. The opener and the version note are pinned individually as well as
 // inside the region below, so a reviewer gets a precise failure before the whole-region diff.
@@ -257,31 +273,70 @@ assert(
   "Claude manifest source must declare mcpServers exactly once",
 );
 assert(claudeManifest.mcpServers.brains.type === "http", "Claude brains MCP must be HTTP");
-// Pin the interpolation, not a resolved URL: hard-coding production here would silently ignore a
-// user's configured endpoint, and a broken interpolation would resolve to a 404.
+// A LITERAL, never a `${user_config.*}` template. claude.ai reads this declaration to prefill its
+// "Add custom connector" dialog, and that surface resolves no user config: a template arrives in
+// the URL field verbatim, fails the field's own `https` validation, and the field then rejects
+// every edit the user tries — so the connector cannot be added at all. The declared default is no
+// help either; nothing substitutes it there. The cost is deliberate and lives in the endpoint copy
+// below: this URL no longer follows `userConfig.endpoint`.
 assert(
   claudeManifest.mcpServers.brains.url === CLAUDE_MCP_URL,
   `Claude brains MCP URL must be ${CLAUDE_MCP_URL}`,
 );
+// Shape check independent of the constant above, so editing both in tandem still cannot reintroduce
+// a template or a non-https scheme.
+assert(
+  claudeManifest.mcpServers.brains.url.startsWith("https://")
+    && !claudeManifest.mcpServers.brains.url.includes("${"),
+  "Claude brains MCP URL must be a literal https URL — claude.ai cannot resolve a template",
+);
+// Both clients must reach the same server. Scoped claim: this makes the resolved URL invariant
+// under the inline-vs-.mcp.json merge (Claude Code 2.1.221 merges the two and prefers the inline
+// entry on a key collision), so it no longer matters which source a given client picks. It is NOT a
+// guarantee about effective grants — the two entries still differ, `.mcp.json` carrying `scopes`
+// and this one not.
+assert(
+  claudeManifest.mcpServers.brains.url === codexMcp.mcpServers.brains.url,
+  `Claude and Codex must declare the same brains MCP URL — got ${claudeManifest.mcpServers.brains.url} and ${codexMcp.mcpServers.brains.url}`,
+);
 // A stray key INSIDE the server entry passes `claude plugin validate --strict` in total silence —
 // only unknown TOP-LEVEL fields warn — so a `scopes` key copied in good faith from the Codex
-// declaration next door would look accepted and do nothing. This allow-list is the only check
-// that catches it.
+// declaration next door would look accepted and do nothing. Measured against a local OAuth stub on
+// Claude Code 2.1.221: a `scopes` key here is ignored, and so is `.mcp.json`'s — Claude Code asks
+// for whatever the server's metadata advertises. Production advertises read and write today, which
+// is what the Codex declaration next door asks for, so the key is inert rather than harmful. This
+// allow-list is the only check that catches it.
 assert(
   JSON.stringify(Object.keys(claudeManifest.mcpServers.brains).sort())
     === JSON.stringify([...CLAUDE_MCP_KEYS].sort()),
   `Claude brains MCP may only declare ${CLAUDE_MCP_KEYS.join(", ")} — got ${Object.keys(claudeManifest.mcpServers.brains).join(", ")}`,
 );
 
-// The URL above interpolates this, so it can never be missing or empty.
+// The MCP URL above no longer interpolates this, but conversation capture and the inbox still do —
+// they build /ingest/claude and /inbox/claude from it in shell, off CLAUDE_PLUGIN_OPTION_ENDPOINT.
+// So the default still has to be present and still has to be production, or a user who never
+// configures anything gets capture pointed at nothing. The hook-level proof is at the bottom of this
+// file; these two only pin the declaration.
 const claudeEndpointConfig = claudeManifest.userConfig?.endpoint ?? {};
 assert(
   typeof claudeEndpointConfig.default === "string" && claudeEndpointConfig.default !== "",
-  "Claude endpoint config must keep a non-empty default — the MCP URL interpolates it",
+  "Claude endpoint config must keep a non-empty default — capture and the inbox derive their URLs from it",
 );
 assert(
   claudeEndpointConfig.default === CLAUDE_ENDPOINT,
   `Claude endpoint default must be ${CLAUDE_ENDPOINT}`,
+);
+// The copy has to keep matching what the field actually does. It claimed /mcp derived from the
+// endpoint for as long as that was true and would have kept claiming it afterwards.
+assert(
+  normalizeCopy(claudeEndpointConfig.description ?? "") === CLAUDE_ENDPOINT_DESCRIPTION,
+  "Claude endpoint description must match the approved wording exactly",
+);
+// Narrower backstop for a rewrite that edits the constant above too: the one claim that must never
+// come back is that the MCP URL derives from this setting.
+assert(
+  !/\/mcp\b[^.]{0,40}\bfrom it\b/i.test(claudeEndpointConfig.description ?? ""),
+  "Claude endpoint description must not claim /mcp derives from the endpoint — it does not",
 );
 
 // Conversation capture and the inbox are OPT-IN now that they are the token's only job. This must
@@ -744,7 +799,8 @@ assert(
 
 // Exercise the standalone Codex path without a token env. The fake `codex`
 // exposes the same persisted Authorization shape as `codex mcp get`, while the
-// fake `curl` captures only POST bodies (the inbox GET remains a no-op).
+// fake `curl` captures POST bodies and, when URL_FILE is set, every request
+// target as well (the inbox GET returns nothing either way).
 const temp = mkdtempSync(join(tmpdir(), "brains-plugin-contract-"));
 try {
   const bin = join(temp, "bin");
@@ -756,7 +812,7 @@ try {
   );
   writeFileSync(
     join(bin, "curl"),
-    '#!/bin/sh\n[ "${SLOW_CAPTURE:-}" = "1" ] && sleep 0.2\nprev=""\nfor arg in "$@"; do\n  if [ "$prev" = "-d" ]; then printf \'%s\\n\' "$arg" >> "$CAPTURE_FILE"; fi\n  prev="$arg"\ndone\n',
+    '#!/bin/sh\n[ "${SLOW_CAPTURE:-}" = "1" ] && sleep 0.2\nprev=""\nfor arg in "$@"; do\n  if [ "$prev" = "-d" ]; then printf \'%s\\n\' "$arg" >> "$CAPTURE_FILE"; fi\n  case "$arg" in\n    http://*|https://*) [ -n "${URL_FILE:-}" ] && printf \'%s\\n\' "$arg" >> "$URL_FILE" ;;\n  esac\n  prev="$arg"\ndone\n',
   );
   chmodSync(join(bin, "codex"), 0o755);
   chmodSync(join(bin, "curl"), 0o755);
@@ -856,6 +912,130 @@ try {
   assert(
     inboxNoToken.stdout.toString() === "" && inboxNoToken.stderr.toString() === "",
     "inbox engine must stay silent with no token available",
+  );
+
+  // The MCP URL is a literal now, so `userConfig.endpoint` governs capture and the inbox and
+  // nothing else. That makes this the one check standing between a self-hosted user and silence:
+  // pin the request TARGETS, not just the bodies. Nothing pinned them before — the fake curl only
+  // recorded `-d` payloads, so a hook that started posting captures to the hardcoded production
+  // host would have passed every assertion above it.
+  //
+  // Runs the Claude path deliberately (no PLUGIN_ROOT), because claude-hooks.json is what this
+  // guards, and in `prompt` mode the engine makes exactly one inbox GET with no device report.
+  const endpointCapture = join(temp, "endpoint-payloads.jsonl");
+  const endpointUrls = join(temp, "endpoint-urls.txt");
+  const endpointRun = spawnSync("bash", [join(PLUGIN, "hooks", "brains-turn.sh")], {
+    input: JSON.stringify({ session_id: "claude-session", prompt: "hello" }),
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      CLAUDE_PLUGIN_OPTION_TOKEN: "endpoint-probe-token",
+      CLAUDE_PLUGIN_OPTION_ENDPOINT: CLAUDE_SELF_HOSTED,
+      BRAINS_API_TOKEN: "",
+      BRAINS_INBOX_TOKEN: "",
+      BRAINS_STATE_DIR: join(temp, "state-endpoint"),
+      CAPTURE_FILE: endpointCapture,
+      URL_FILE: endpointUrls,
+    },
+  });
+  assert(endpointRun.status === 0, `configured-endpoint turn hook failed: ${endpointRun.stderr.toString()}`);
+  // Gate on the payload file, not the URL file: the user ingest POST is backgrounded, and the fake
+  // curl writes a request's URL before its body — so a present body means the URL landed already.
+  assert(await waitForFile(endpointCapture), "configured-endpoint ingest POST did not complete");
+  const requestedUrls = readFileSync(endpointUrls, "utf8").trim().split("\n");
+  assert(
+    requestedUrls.includes(`${CLAUDE_SELF_HOSTED}/ingest/claude`),
+    `capture must POST to the configured endpoint — got ${requestedUrls.join(", ")}`,
+  );
+  assert(
+    requestedUrls.some((url) => url.startsWith(`${CLAUDE_SELF_HOSTED}/inbox/claude`)),
+    `the inbox must poll the configured endpoint — got ${requestedUrls.join(", ")}`,
+  );
+  assert(
+    !requestedUrls.some((url) => url.startsWith(CLAUDE_ENDPOINT)),
+    `no hook request may reach ${CLAUDE_ENDPOINT} when an endpoint is configured — got ${requestedUrls.join(", ")}`,
+  );
+
+  // The same hook with the option NEVER SET — the case a self-hoster actually lands in, and the
+  // one the README's self-hosting section now documents. Claude Code exports
+  // CLAUDE_PLUGIN_OPTION_<KEY> from the value STORED in settings, and a declared `default` is not
+  // by itself a stored value: observed on 2.1.221, installing without `--config endpoint=…` wrote
+  // no `pluginConfigs` entry and exported nothing, so these hooks fell through to their own literal
+  // fallback. Verified against a real `claude -p` run whose manifest carried a sentinel default
+  // that never appeared in the hook environment. Scope of that observation: the non-interactive
+  // install path only — `/plugin configure` was not exercised and may prefill and store the
+  // default, which would leave a configured value behind like any other.
+  //
+  // Pinned because the README now promises this fallback host by name. Changing the fallback
+  // chain in either hook would make that documentation wrong with nothing else to catch it — and
+  // for a self-hoster the failure is data going to the wrong backend, not an error.
+  const unsetEnv: Record<string, string> = { ...process.env } as Record<string, string>;
+  for (const key of ["CLAUDE_PLUGIN_OPTION_ENDPOINT", "BRAINS_ENDPOINT", "BRAINS_INGEST_URL", "BRAINS_INBOX_URL"]) {
+    delete unsetEnv[key];
+  }
+  const defaultCapture = join(temp, "default-payloads.jsonl");
+  const defaultUrls = join(temp, "default-urls.txt");
+  const defaultRun = spawnSync("bash", [join(PLUGIN, "hooks", "brains-turn.sh")], {
+    input: JSON.stringify({ session_id: "claude-session", prompt: "hello" }),
+    env: {
+      ...unsetEnv,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      CLAUDE_PLUGIN_OPTION_TOKEN: "endpoint-probe-token",
+      BRAINS_API_TOKEN: "",
+      BRAINS_INBOX_TOKEN: "",
+      BRAINS_STATE_DIR: join(temp, "state-default"),
+      CAPTURE_FILE: defaultCapture,
+      URL_FILE: defaultUrls,
+    },
+  });
+  assert(defaultRun.status === 0, `unconfigured-endpoint turn hook failed: ${defaultRun.stderr.toString()}`);
+  assert(await waitForFile(defaultCapture), "unconfigured-endpoint ingest POST did not complete");
+  const defaultRequestedUrls = readFileSync(defaultUrls, "utf8").trim().split("\n");
+  assert(
+    defaultRequestedUrls.includes(`${CLAUDE_ENDPOINT}/ingest/claude`),
+    `with no endpoint configured, capture must POST to ${CLAUDE_ENDPOINT} — got ${defaultRequestedUrls.join(", ")}`,
+  );
+  assert(
+    defaultRequestedUrls.some((url) => url.startsWith(`${CLAUDE_ENDPOINT}/inbox/claude`)),
+    `with no endpoint configured, the inbox must poll ${CLAUDE_ENDPOINT} — got ${defaultRequestedUrls.join(", ")}`,
+  );
+
+  // The middle branch of the same chain: no plugin option, but BRAINS_ENDPOINT set in the
+  // environment. This is the ONLY lever a self-hosting Codex user has — Codex runs these same
+  // scripts and has no userConfig mechanism, so `--config` is not available to it and the README
+  // sends Codex users here instead. Untested until now: the two cases above cover the option branch
+  // and the literal fallback, which between them would stay green even if the env branch were
+  // dropped entirely and every Codex capture silently went to production.
+  const envCapture = join(temp, "env-payloads.jsonl");
+  const envUrls = join(temp, "env-urls.txt");
+  const envRun = spawnSync("bash", [join(PLUGIN, "hooks", "brains-turn.sh")], {
+    input: JSON.stringify({ session_id: "claude-session", prompt: "hello" }),
+    env: {
+      ...unsetEnv,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      CLAUDE_PLUGIN_OPTION_TOKEN: "endpoint-probe-token",
+      BRAINS_ENDPOINT: HOOK_ENV_ENDPOINT,
+      BRAINS_API_TOKEN: "",
+      BRAINS_INBOX_TOKEN: "",
+      BRAINS_STATE_DIR: join(temp, "state-env"),
+      CAPTURE_FILE: envCapture,
+      URL_FILE: envUrls,
+    },
+  });
+  assert(envRun.status === 0, `BRAINS_ENDPOINT turn hook failed: ${envRun.stderr.toString()}`);
+  assert(await waitForFile(envCapture), "BRAINS_ENDPOINT ingest POST did not complete");
+  const envRequestedUrls = readFileSync(envUrls, "utf8").trim().split("\n");
+  assert(
+    envRequestedUrls.includes(`${HOOK_ENV_ENDPOINT}/ingest/claude`),
+    `capture must follow BRAINS_ENDPOINT — got ${envRequestedUrls.join(", ")}`,
+  );
+  assert(
+    envRequestedUrls.some((url) => url.startsWith(`${HOOK_ENV_ENDPOINT}/inbox/claude`)),
+    `the inbox must follow BRAINS_ENDPOINT — got ${envRequestedUrls.join(", ")}`,
+  );
+  assert(
+    !envRequestedUrls.some((url) => url.startsWith(CLAUDE_ENDPOINT)),
+    `no hook request may reach ${CLAUDE_ENDPOINT} when BRAINS_ENDPOINT is set — got ${envRequestedUrls.join(", ")}`,
   );
 } finally {
   rmSync(temp, { recursive: true, force: true });
