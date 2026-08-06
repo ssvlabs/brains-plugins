@@ -22,10 +22,10 @@ For schedules and agendas, use `list_calendar_events start=… end=…`; calenda
 page update time is not event time. Name the source page's `title` and `type`,
 and never invent slugs or IDs.
 
-**Capture.** In Codex and Claude Code the ingest hook saves every turn and
-builds the conversation page for you — do **not** call `save_chat_session`
-there. Without those hooks (claude.ai web), nothing is captured unless you
-call `save_chat_session` yourself.
+**Capture.** In Codex and Claude Code the ingest hook saves each turn, but only
+when the user configured capture — it is off without a token, so never promise
+it. Don't call `save_chat_session` routinely there; do call it when asked, and
+where the hooks don't run (claude.ai web) it is the only path.
 
 **The skills carry the detail** — load the one that fits the moment:
 `brains-read` (querying memory), `brains-write` (sending/creating via

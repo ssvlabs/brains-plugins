@@ -43,6 +43,31 @@ const CLAUDE_WEB_HEADING = "## Install for claude.ai web";
 // The one URL a web reader needs; the connector dialog takes it verbatim.
 const CLAUDE_WEB_GUIDE = "https://app.mybrains.ai/install/claude-web";
 
+// Approved claude.ai capture copy, pinned VERBATIM for the same reason as CLAUDE_INSTALL_REGION
+// below: keyword assertions on this section proved evadable in review. A rewrite reading
+// "Capture is handled automatically for you — Claude saves your conversations on its own, so
+// there is nothing to do. (Early builds fired only sometimes; if you are on one, say 'save this
+// chat to brains' or call save_chat_session, and check with list_pages type=chat_session.)"
+// satisfied EVERY signal check — each keyword survived inside a parenthetical while the meaning
+// was fully reversed. So the wording itself is the contract here too.
+//
+// What the wording encodes, measured live on claude.ai (BRNS-MCPWEB-018): an explicit ask works;
+// unprompted capture fired on ONE of five passive trials; one trial announced a save it never
+// performed, which is why the copy tells the reader how to verify rather than merely disclaiming.
+// The named signal assertions further down are kept as well — they give a precise failure on a
+// legitimate edit, ahead of this whole-region diff.
+const CLAUDE_WEB_CAPTURE_REGION = [
+  "**Capture is different — ask for it.** On claude.ai a conversation is saved only",
+  "when Claude calls `save_chat_session`. Say \"save this chat to brains\" and it",
+  "does; that is the dependable way, and the way to treat anything you want kept.",
+  "",
+  "With the install guide's instruction block in place Claude also saves on its own",
+  "sometimes — but only sometimes, and in testing it once said it was saving",
+  "without actually doing so. Don't rely on it, and don't take the sentence in the",
+  "chat as proof: `list_pages type=chat_session`, or just ask brains which chats it",
+  "has, is the only real confirmation.",
+].join("\n");
+
 // Approved token copy, pinned verbatim. Hand-written phrasing checks proved both evadable and
 // prone to false positives, so the wording itself is the contract; the regex pair further down
 // stays only as a backstop.
@@ -495,19 +520,29 @@ for (const signal of [
   "note the error and what you were doing",
   "Do not attach it to unrelated later feedback",
   "Once per session, when natural, mention `brains-feedback`",
-  // The capture rule must stay CLIENT-SCOPED. Nothing pinned it before, which is how
-  // "Capture is automatic … You do not need to call save_chat_session" survived here
-  // unqualified while being false anywhere the hooks don't run — claude.ai web runs
-  // none of them, on either install path (BRNS-MCPWEB-018).
-  "nothing is captured unless you call",
+  // The capture rule must stay conditional on BOTH axes. Nothing pinned it before, which is
+  // how "Capture is automatic … You do not need to call save_chat_session" survived here
+  // while being false in two shipped configurations at once (BRNS-MCPWEB-018):
+  //   1. no hooks at all — claude.ai web, on either install path;
+  //   2. hooks present but capture unconfigured — brains-turn.sh:43 exits early with no token,
+  //      and that token is `required: false`. brains-start.sh:27 cats core.md with NO token
+  //      check, so precisely those users are the ones who read the claim.
+  // Both axes get a signal: a rewrite dropping either one re-promises capture to a real user
+  // who is not getting it.
+  "only when the user configured capture",
+  "where the hooks don't run",
+  // And the prohibition must stay NARROW. A blanket "do not call save_chat_session" suppressed
+  // the tool even when the user asked for it outright — on claude.ai that ask is the one path
+  // measured to work reliably.
+  "do call it when asked",
 ]) {
   assert(coreNormalized.includes(signal), `compact core is missing routing/delegation signal: ${signal}`);
 }
-// Backstop for a rewrite that edits the signal above too: the unconditional claim is the
-// one that must never return, in any paraphrase that drops the client scoping.
+// Backstop for a rewrite that edits the signals above too: the unconditional claim is the one
+// that must never return, in any paraphrase that drops the scoping.
 assert(
-  !/capture is automatic/i.test(core),
-  "core must not claim capture is automatic — it is hook-driven, and no hooks run on claude.ai web",
+  !/capture is automatic|saves every turn\b/i.test(core),
+  "core must not promise capture unconditionally — it needs the hooks AND a configured token",
 );
 assert(core.length < 3_000, "always-loaded core must stay below 3,000 characters");
 
@@ -777,11 +812,21 @@ assert(
 // the three-command install, where a broken line would strand a user mid-install.
 const claudeShellBlocks = [...claudeReadme.matchAll(/```sh\n([\s\S]*?)```/g)].map((match) => match[1]);
 assert(claudeShellBlocks.length > 0, "README's Claude install must keep its shell blocks");
-for (const block of claudeShellBlocks) {
+// Sweep EVERY block in the file, not just this slice. Region-scoped sweeping silently lost
+// coverage the moment a block moved: promoting "Self-hosting" past "## Shared layout" took its
+// `--config endpoint=…` example outside every slice checked here, and the six Codex blocks were
+// never swept at all — so the one command a self-hoster copies, and the whole Codex install, were
+// unchecked. The syntax of a published command does not depend on which section it sits in.
+const readmeShellBlocks = [...readme.matchAll(/```sh\n([\s\S]*?)```/g)].map((match) => match[1]);
+assert(
+  readmeShellBlocks.length >= claudeShellBlocks.length,
+  "the whole-file shell sweep must cover at least the Claude install's blocks",
+);
+for (const block of readmeShellBlocks) {
   const parsed = spawnSync("bash", ["-n"], { input: block, encoding: "utf8" });
   assert(
     parsed.status === 0,
-    `README's Claude shell block is not valid shell:\n${block}\n${parsed.stderr}`,
+    `README shell block is not valid shell:\n${block}\n${parsed.stderr}`,
   );
 }
 
@@ -850,6 +895,19 @@ assert(
 assert(
   !/\bcapture is automatic\b/i.test(webReadme),
   "README's web section must not claim automatic capture — no hooks run on claude.ai, on either install path",
+);
+// And the strong guarantee the checks above cannot give: the two capture paragraphs, verbatim.
+// Every assertion above passed a rewrite that reversed their meaning (see the constant's own
+// comment), so this is what actually holds the line. Changing this copy is a deliberate two-line
+// diff: CLAUDE_WEB_CAPTURE_REGION and the README together.
+const webCaptureStart = webReadme.indexOf("**Capture is different");
+assert(
+  webCaptureStart > 0,
+  "README's web section must keep its capture paragraphs — they are what a web user needs most",
+);
+assert(
+  normalizeRegion(webReadme.slice(webCaptureStart)) === CLAUDE_WEB_CAPTURE_REGION,
+  "README's claude.ai capture copy must match the approved wording exactly (README and CLAUDE_WEB_CAPTURE_REGION must be edited together)",
 );
 
 assert(

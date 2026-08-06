@@ -151,12 +151,12 @@ Code get from `hooks/` does not happen there. Two ways in, both covered step by
 step at <https://app.mybrains.ai/install/claude-web>:
 
 - **Custom connector** — add `https://mcp.mybrains.ai/mcp` and approve the OAuth
-  screen. Works on any plan.
+  screen. This is the path we verified end to end.
 - **Full plugin** — add this repository as a marketplace and install from it.
   Paid plans only; it also brings the skills. The hooks it lists stay inert.
 
-Recall works on both: ask about a person, project or past conversation and
-Claude reaches for brains on its own.
+Recall works: ask about a person, project or past conversation and Claude
+reaches for brains on its own.
 
 **Capture is different — ask for it.** On claude.ai a conversation is saved only
 when Claude calls `save_chat_session`. Say "save this chat to brains" and it
