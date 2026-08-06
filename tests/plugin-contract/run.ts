@@ -87,7 +87,7 @@ const CLAUDE_WEB_GUIDE = "https://app.mybrains.ai/install/claude-web";
 // satisfied EVERY signal check — each keyword survived inside a parenthetical while the meaning
 // was fully reversed. So the wording itself is the contract here too.
 //
-// What the wording encodes, measured live on claude.ai (BRNS-MCPWEB-018): an explicit ask works;
+// What the wording encodes, measured live on claude.ai (2026-08-05): an explicit ask works;
 // unprompted capture fired on ONE of five passive trials; one trial announced a save it never
 // performed, which is why the copy tells the reader how to verify rather than merely disclaiming.
 // The named signal assertions further down are kept as well — they give a precise failure on a
@@ -638,7 +638,7 @@ for (const signal of [
   "Once per session, when natural, mention `brains-feedback`",
   // The capture rule must stay conditional on BOTH axes. Nothing pinned it before, which is
   // how "Capture is automatic … You do not need to call save_chat_session" survived here
-  // while being false in two shipped configurations at once (BRNS-MCPWEB-018):
+  // while being false in two shipped configurations at once:
   //   1. no hooks at all — claude.ai web, on either install path;
   //   2. hooks present but capture unconfigured — brains-turn.sh:43 exits early with no token,
   //      and that token is `required: false`. brains-start.sh:27 cats core.md with NO token
@@ -1012,7 +1012,7 @@ assert(
 // This section exists because the rest of this README describes hook-driven capture, and a web
 // reader gets none of it: hooks are inert in claude.ai chat on BOTH install paths — the custom
 // connector and the full marketplace-sync plugin (support article 13837440). What replaces them
-// was measured live rather than assumed (BRNS-MCPWEB-018): an explicit "save this chat to brains"
+// was measured live rather than assumed (claude.ai, 2026-08-05): an explicit "save this chat to brains"
 // works, while unprompted capture fired on ONE of five passive trials — including a trial that
 // announced a save it never performed. The assertions below pin that distinction, because the
 // tempting edit is to collapse the two into one reassuring sentence, and the whole finding is
