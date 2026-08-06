@@ -42,6 +42,39 @@ const CLAUDE_OPTIONAL_HEADING = "### Optional:";
 // The qualifier both card surfaces must carry. It scopes capture and the inbox together, because
 // they share one credential gate and one delivery mechanism.
 const CAPTURE_QUALIFIER = "hook-driven turn-by-turn capture and inbox delivery";
+
+// The COMPLETE hook event map per client: event -> the script that must run for it. Pinned as an
+// exact set rather than an includes-list because three holes sat under the old assertions, and each
+// one let published behaviour reach zero users with the suite green (#14):
+//
+//   1. AN EVENT COULD BE DELETED. Only PostToolUseFailure and SessionEnd were asserted for Claude —
+//      SessionStart, UserPromptSubmit and Stop never were. Deleting SessionStart passed both
+//      suites, and SessionStart is the ONLY delivery path for core.md (brains-start.sh:27 cats it).
+//      So every verbatim copy pin in this file proved the text was correct while nothing proved it
+//      ever loads. Guard-works is not guard-runs.
+//   2. AN EVENT COULD BE GUTTED. `includes("PostToolUseFailure")` is satisfied by the KEY existing,
+//      so `PostToolUseFailure: []` passed with its own assertion intact — the assertion guaranteed
+//      a name, not a hook.
+//   3. THE MAPPING WAS UNPINNED. Pointing SessionStart at brains-end.sh passed.
+//
+// Codex carried all three identically, so both maps are checked the same way. Adding or removing an
+// event is now a deliberate two-line edit — this constant and the JSON together — the same shape as
+// the copy pins above. The three positive `includes` assertions these replace are gone: exact-set
+// equality subsumes them, and keeping per-event positives for some events and not others is how the
+// gap formed in the first place.
+const CLAUDE_HOOK_EVENTS: Record<string, string> = {
+  SessionStart: "brains-start.sh",
+  UserPromptSubmit: "brains-turn.sh",
+  Stop: "brains-turn.sh",
+  SessionEnd: "brains-end.sh",
+  PostToolUseFailure: "brains-tool-error.sh",
+};
+const CODEX_HOOK_EVENTS: Record<string, string> = {
+  SessionStart: "brains-start.sh",
+  UserPromptSubmit: "brains-turn.sh",
+  Stop: "brains-turn.sh",
+  PostToolUse: "brains-tool-error.sh",
+};
 const CLAUDE_WEB_HEADING = "## Install for claude.ai web";
 // The one URL a web reader needs; the connector dialog takes it verbatim.
 const CLAUDE_WEB_GUIDE = "https://app.mybrains.ai/install/claude-web";
@@ -200,6 +233,40 @@ function hookScripts(config: any): string[] {
   );
 }
 
+// Deliberately NOT folded into hookScripts(): that helper flattens every event into one command
+// list, which is exactly what the callers below want and exactly what loses the event identity this
+// check needs. A vacuous `SessionStart: []` contributes nothing to the flattened list and is
+// therefore invisible to any assertion built on it — which is how hole 2 survived.
+function assertHookEventMap(label: string, config: any, expected: Record<string, string>): void {
+  const declared = Object.keys(config.hooks ?? {}).sort();
+  const wanted = Object.keys(expected).sort();
+  assert(
+    JSON.stringify(declared) === JSON.stringify(wanted),
+    `${label} hook events must be exactly [${wanted.join(", ")}] — got [${declared.join(", ") || "none"}]. `
+      + `Adding or removing one is a two-line edit: this JSON and ${label.toUpperCase()}_HOOK_EVENTS.`,
+  );
+  for (const [event, script] of Object.entries(expected)) {
+    const groups = config.hooks[event];
+    assert(
+      Array.isArray(groups) && groups.length > 0,
+      `${label} ${event} declares no matcher groups — an empty array satisfies a key-existence check and runs nothing`,
+    );
+    const commands = groups
+      .flatMap((group: any) => group.hooks ?? [])
+      .map((hook: any) => hook.command as string);
+    assert(
+      commands.length > 0,
+      `${label} ${event} declares no commands — an empty array satisfies a key-existence check and runs nothing`,
+    );
+    for (const command of commands) {
+      assert(
+        command.includes(`hooks/${script}`),
+        `${label} ${event} must run ${script} — got: ${command}`,
+      );
+    }
+  }
+}
+
 const claudeManifest = readJson(join(PLUGIN, ".claude-plugin", "plugin.json"));
 const codexManifest = readJson(join(PLUGIN, ".codex-plugin", "plugin.json"));
 const claudeMarketplace = readJson(join(ROOT, ".claude-plugin", "marketplace.json"));
@@ -261,9 +328,11 @@ assert(codexMarketplace.plugins[0]?.policy?.authentication === "ON_USE", "Codex 
 
 const claudeEvents = Object.keys(claudeHooks.hooks).sort();
 const codexEvents = Object.keys(codexHooks.hooks).sort();
-assert(claudeEvents.includes("PostToolUseFailure"), "Claude failure hook missing");
-assert(claudeEvents.includes("SessionEnd"), "Claude session-end hook missing");
-assert(codexEvents.includes("PostToolUse"), "Codex tool-result hook missing");
+assertHookEventMap("Claude", claudeHooks, CLAUDE_HOOK_EVENTS);
+assertHookEventMap("Codex", codexHooks, CODEX_HOOK_EVENTS);
+// Kept, and deliberately redundant with the exact-set check above: these two absences are a
+// CAPABILITY fact — Codex supports neither event — not a gap waiting to be filled. The set check
+// would reject adding them but would report it as a set mismatch; these say why.
 assert(!codexEvents.includes("PostToolUseFailure"), "Codex does not support PostToolUseFailure");
 assert(!codexEvents.includes("SessionEnd"), "Codex does not support SessionEnd");
 
