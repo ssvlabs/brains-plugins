@@ -23,9 +23,10 @@ page update time is not event time. Name the source page's `title` and `type`,
 and never invent slugs or IDs.
 
 **Capture.** In Codex and Claude Code the ingest hook saves each turn, but only
-when the user configured capture — it is off without a token, so never promise
-it. Don't call `save_chat_session` routinely there; do call it when asked, and
-where the hooks don't run (claude.ai web) it is the only path.
+where a capture credential resolves — so never promise capture and never deny
+it; `list_pages type=chat_session` is the only way to know. Don't call
+`save_chat_session` routinely there; do call it when asked, and where the hooks
+don't run (claude.ai web) it is the only path.
 
 **The skills carry the detail** — load the one that fits the moment:
 `brains-read` (querying memory), `brains-write` (sending/creating via

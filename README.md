@@ -2,7 +2,7 @@
 
 Your memory layer for Codex and Claude Code: Gmail, Calendar, Drive, and prior
 AI conversations as queryable pages — with reflexive recall, hook-driven
-turn-by-turn capture, a server-driven inbox, boards, automations, and workflows
+turn-by-turn capture and inbox delivery, boards, automations, and workflows
 on top. The same server also backs claude.ai, where no hooks run — see
 [Install for claude.ai web](#install-for-claudeai-web).
 
