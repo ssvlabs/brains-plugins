@@ -117,7 +117,7 @@ type HookGroup = {
 const CLAUDE_HOOK_EVENTS: Record<string, HookGroup[]> = {
   SessionStart: [
     {
-      matcher: "startup|resume|clear",
+      matcher: "startup|resume|clear|compact",
       hooks: [
         {
           type: "command",
