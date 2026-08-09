@@ -773,9 +773,13 @@ const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 const core = readFileSync(join(PLUGIN, "core.md"), "utf8");
 const writeSkill = readFileSync(join(PLUGIN, "skills", "brains-write", "SKILL.md"), "utf8");
 const buildSkill = readFileSync(join(PLUGIN, "skills", "brains-build", "SKILL.md"), "utf8");
+const boardSkill = readFileSync(join(PLUGIN, "skills", "brains-board", "SKILL.md"), "utf8");
+const automationSkill = readFileSync(join(PLUGIN, "skills", "brains-automation", "SKILL.md"), "utf8");
+const workflowSkill = readFileSync(join(PLUGIN, "skills", "brains-workflow", "SKILL.md"), "utf8");
 const capabilityManifest = readJson(join(PLUGIN, "generated", "capability-catalog.json"));
 const coreNormalized = core.replace(/\s+/g, " ");
 const writeSkillNormalized = writeSkill.replace(/\s+/g, " ");
+const automationSkillNormalized = automationSkill.replace(/\s+/g, " ");
 
 assert(claudeManifest.name === "brains", "Claude manifest name must be brains");
 assert(codexManifest.name === "brains", "Codex manifest name must be brains");
@@ -1430,11 +1434,14 @@ assert(
 const LOCAL_ARTIFACT: Record<string, string> = {
   "plugins/brains/skills/brains-write/SKILL.md": writeSkill,
   "plugins/brains/skills/brains-build/SKILL.md": buildSkill,
+  "plugins/brains/skills/brains-board/SKILL.md": boardSkill,
+  "plugins/brains/skills/brains-automation/SKILL.md": automationSkill,
+  "plugins/brains/skills/brains-workflow/SKILL.md": workflowSkill,
 };
 assert(Array.isArray(capabilityManifest.artifacts), "manifest must carry an artifacts array");
 assert(
   capabilityManifest.artifacts.map((a: any) => a.capability_id).sort().join(",") ===
-    "brains-features,integration-actions",
+    "brains-features,integration-actions,procedure:automation,procedure:board,procedure:workflow",
   "published capability set mismatch",
 );
 for (const entry of capabilityManifest.artifacts) {
@@ -1449,48 +1456,124 @@ for (const entry of capabilityManifest.artifacts) {
     body!.includes("Do not hand-edit"),
     `generated artifact is missing its do-not-hand-edit header: ${entry.artifact_path}`,
   );
+  // Internal CODE identifiers, which a published skill can never have a reason to
+  // name: a cross-tenant DB pool, a board-form-queries column, an import-grants
+  // column. None appears in any published artifact today, which is what makes the
+  // denylist shape work here.
+  //
+  // `automation_secret` and `telegram_push` used to be on this list and were
+  // REMOVED, deliberately. They are registered MCP tools —
+  // apps/mcp/src/tools/automation.ts (automation_secret_list / _get / _set) and
+  // apps/mcp/src/tools/telegram-push.ts — so the list was conflating internal
+  // identifiers with user-facing tool names, and naming tools is precisely a
+  // public skill's job. The ban was invisible only because the sole published
+  // artifacts predated the automation authoring skill; the moment that skill
+  // shipped, the ban failed a CORRECT artifact and would have been "fixed" by
+  // stripping its secret-hygiene guidance. Do not re-add either name. What those
+  // two were reaching for is asserted positively instead, below.
   assert(
-    !/automation_secret|adminPool|handler_source|telegram_push|grant_token/.test(body!),
+    !/adminPool|handler_source|grant_token/.test(body!),
     `public skill leaked an internal-only capability: ${entry.artifact_path}`,
   );
 }
 
 // Eager skill-metadata budget (skills authoring & discovery contract §3): the
 // CLI hosts preload EVERY installed skill's name + description for routing, so
-// skill count is a budget, not a detail. Education was deliberately rendered
-// INTO brains-build rather than added as an eighth skill; pin the count so a
-// future addition is a reviewed act, not a silent one.
+// skill count is a budget, not a detail. Two decisions live behind this pin, and
+// both are still in force:
+//
+//   1. Education was deliberately rendered INTO brains-build rather than added as
+//      its own skill. Unchanged — brains-build is still one skill carrying the
+//      whole feature inventory.
+//   2. The three authoring procedures ARE separate skills. That is the *_flow
+//      playbook migration: a procedure the model must follow turn-by-turn has to
+//      be routable on its own trigger vocabulary, which is exactly what an eager
+//      description buys. Folding them into brains-build would have made one
+//      description claim both "what can brains do" and every build phrase — the
+//      routing collision the disjointness check below exists to forbid.
+//
+// So the budget rule was not abandoned when this went from seven names to ten; it
+// was spent, deliberately, on the three procedures. The pin's purpose is that a
+// future addition is a reviewed act and not a silent one, and it did its job here:
+// this list changing is what forced that review.
 const skillDirs = readdirSync(join(PLUGIN, "skills"), { withFileTypes: true })
   .filter((e) => e.isDirectory())
   .map((e) => e.name)
   .sort();
 assert(
   skillDirs.join(",") ===
-    "brains-agenda,brains-build,brains-feedback,brains-integrations,brains-nudges,brains-read,brains-write",
+    "brains-agenda,brains-automation,brains-board,brains-build,brains-feedback," +
+      "brains-integrations,brains-nudges,brains-read,brains-workflow,brains-write",
   `skill set changed (${skillDirs.join(", ")}) — see the eager-budget rule before adding one`,
 );
 
 // Cross-skill trigger disjointness (§1: triggers must be mutually distinct).
 // This lives HERE and not in the monorepo generator on purpose: the sibling
 // SKILL.md bodies exist only in this repo, so an assertion there would have no
-// inputs and pass forever. brains-build's rendered description samples authored
-// trigger phrases verbatim; none may be claimed by another skill's description.
-const SAMPLED_TRIGGERS = ["track a list of", "every morning do", "build me a deck"];
-const buildDescription = /^description:\s*(.+)$/m.exec(buildSkill)?.[1] ?? "";
-for (const trigger of SAMPLED_TRIGGERS) {
-  assert(
-    buildDescription.toLowerCase().includes(trigger),
-    `brains-build no longer samples the trigger "${trigger}" — regenerate from the monorepo catalog`,
-  );
-  for (const dir of skillDirs) {
-    if (dir === "brains-build") continue;
-    const sibling = readFileSync(join(PLUGIN, "skills", dir, "SKILL.md"), "utf8");
-    const siblingDescription = /^description:\s*(.+)$/m.exec(sibling)?.[1] ?? "";
+// inputs and pass forever.
+//
+// It used to sample three phrases from brains-build's description and require no
+// sibling to claim them. That inverted when the procedures became skills:
+// brains-build no longer advertises build vocabulary at all, it DISCLAIMS it
+// ("Yields to brains-board / brains-automation / brains-workflow"), so the old
+// check would fail in both directions at once — brains-build missing the phrases
+// it no longer wants, and brains-board/-automation legitimately owning them.
+//
+// The property that actually matters is ownership: each phrase routes to exactly
+// one skill. So pin an owner per phrase and sweep every other description,
+// brains-build INCLUDED — pinning the yield is the point, since re-claiming a
+// build phrase there is the specific regression the recut exists to prevent.
+// Phrases are the authored `triggers` arrays in the monorepo's
+// packages/capability-catalog/procedure-catalog.ts. brains-build's are NOT from a
+// triggers array: they are the literal inventory phrases in
+// render-features.ts:renderSkillDescription, education's own vocabulary, none of
+// which is a doing verb.
+const TRIGGER_OWNERS: Record<string, readonly string[]> = {
+  "brains-board": ["track a list of", "keep a table of", "build a tracker", "build a CRM", "log every"],
+  "brains-automation": [
+    "automate this",
+    "every morning do",
+    "run this nightly",
+    "auto-draft when",
+    "when an email from",
+  ],
+  "brains-workflow": ["ship X by", "coordinate this initiative", "set up a project with KPIs and a team"],
+  "brains-build": ["what can brains do", "can brains do", "what else can brains do"],
+};
+const descriptionOf = (dir: string): string => {
+  const body = readFileSync(join(PLUGIN, "skills", dir, "SKILL.md"), "utf8");
+  return (/^description:\s*(.+)$/m.exec(body)?.[1] ?? "").toLowerCase();
+};
+const DESCRIPTIONS = new Map(skillDirs.map((dir) => [dir, descriptionOf(dir)]));
+for (const [owner, triggers] of Object.entries(TRIGGER_OWNERS)) {
+  const ownerDescription = DESCRIPTIONS.get(owner);
+  assert(ownerDescription !== undefined, `trigger owner ${owner} is not an installed skill`);
+  for (const trigger of triggers) {
+    const phrase = trigger.toLowerCase();
     assert(
-      !siblingDescription.toLowerCase().includes(trigger),
-      `trigger "${trigger}" is claimed by both brains-build and ${dir} — routing collision`,
+      ownerDescription!.includes(phrase),
+      `${owner} no longer advertises its own trigger "${trigger}" — regenerate from the monorepo catalog`,
     );
+    for (const [dir, description] of DESCRIPTIONS) {
+      if (dir === owner) continue;
+      assert(
+        !description.includes(phrase),
+        `trigger "${trigger}" is claimed by both ${owner} and ${dir} — routing collision`,
+      );
+    }
   }
+}
+
+// The yield, asserted positively. brains-build builds this clause from
+// PROCEDURE_SKILL_IDS (render-features.ts), so it names all three owners rather
+// than merely avoiding their phrases — a recut that dropped the hand-off while
+// keeping its own vocabulary clean would pass the sweep above and still leave a
+// user asking to build something with nowhere to be sent.
+for (const owner of ["brains-board", "brains-automation", "brains-workflow"]) {
+  assert(
+    DESCRIPTIONS.get("brains-build")!.includes(owner),
+    `brains-build must name ${owner} as the owner it yields to`,
+  );
 }
 
 // brains-build is the education face: it must POINT, not restate. It routes to
@@ -1570,6 +1653,38 @@ assert(!writeSkillNormalized.includes("never call `discard_action`"), "draft dis
 assert(writeSkillNormalized.includes("remains approvable"), "expired drafts must not be described as inert");
 assert(writeSkillNormalized.includes("this tuple is the only call shape"), "source-only action fallback must stay prohibited");
 assert(!/act_on_integration[^.]{0,200}request=/.test(writeSkillNormalized), "free-form action request must not return");
+
+// Same treatment for brains-automation, and for the same reason: the digest proves
+// these bytes came from the catalog, not that the catalog kept the rails. Nothing
+// here would notice if a regeneration DELETED the secret-hygiene guidance — the
+// digest would move with it and every check above would stay green. These three are
+// the rails whose absence is a credential-exposure bug, one per distinct rule:
+// don't ask for a bot token, don't solicit a secret value while authoring, and
+// don't echo one back if the user pastes it anyway.
+//
+// Each pins an IMPERATIVE, not the prose explaining it. Rationale sentences get
+// reworded editorially and would red this build for no behavioral change; a
+// directive cannot be reworded without changing the rule.
+//
+// COUPLING, stated because it is load-bearing: these substrings live in a
+// generated artifact whose source is a different, PRIVATE repo, so an author
+// rewording the procedure reds a build in a public repo they may not know exists.
+// If that happens, the fix is to re-derive the rail in ssvlabs/brains at
+// packages/capability-catalog/procedures/create-automation.md and regenerate.
+// Never soften or delete the assertion here — that is the exact outcome it exists
+// to prevent.
+assert(
+  automationSkillNormalized.includes("Never ask the user to paste a Telegram bot token"),
+  "brains-automation lost the Telegram bot-token refusal",
+);
+assert(
+  automationSkillNormalized.includes("never solicit the value in chat"),
+  "brains-automation lost the rule against soliciting a secret value in chat",
+);
+assert(
+  automationSkillNormalized.includes("do NOT refuse and do NOT echo it back"),
+  "brains-automation lost the handling for a secret the user pasted anyway",
+);
 
 // This README is the install instructions for anyone who finds the repo directly rather than the
 // guided page, so it has to carry the same contract. It documented `export BRAINS_API_TOKEN` as the
