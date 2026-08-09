@@ -35,8 +35,9 @@ expected. Codex stores the credential itself, so there is nothing to copy or
 keep. Confirm with `codex mcp list`: brains should read **OAuth**.
 
 Restart the ChatGPT desktop app or start a new Codex thread. The first time the
-plugin loads, open `/hooks` and trust the bundled brains hooks so automatic
-recall, capture, inbox delivery, and error feedback can run.
+plugin loads, open `/hooks` and trust the bundled brains hooks — that is what
+runs automatic recall and error feedback. Capture and inbox delivery also need a
+capture credential — normally the token below.
 
 Everyday reading and writing is covered by default. For admin-gated tools or
 performance insights, sign in asking for them explicitly (both also need the
@@ -103,7 +104,8 @@ This flow was verified on Claude Code 2.1.220. If `claude mcp login` is not a re
 command, update Claude Code.
 
 Restart Claude Code or start a new session. The first time the plugin loads, trust the bundled
-brains hooks so automatic recall, capture, inbox delivery, and error feedback can run.
+brains hooks — that is what runs automatic recall and error feedback. Capture and inbox delivery
+also need the token below.
 
 For a local checkout under development:
 

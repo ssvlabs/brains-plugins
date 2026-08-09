@@ -15,8 +15,10 @@
 #                                                 mode (notifications only, no
 #                                                 stdout). Fires AFTER the turn.
 #
-# Ingest is the capture path: every turn POSTs to /ingest/claude, and the server
-# builds the chat_session page. No save_chat_session call needed.
+# Ingest is the capture path WHERE IT RUNS, and it is credential-gated: with a
+# TOKEN (see the gate below) every turn POSTs to /ingest/claude and the server
+# builds the chat_session page. Without one this hook exits silently, and where
+# the hooks do not run at all (claude.ai web) save_chat_session is the only path.
 # Claude keeps the existing fire-and-forget delivery. Codex waits for its
 # assistant POST during Stop so the hook process cannot finish before the
 # response has been handed to the ingest endpoint.
