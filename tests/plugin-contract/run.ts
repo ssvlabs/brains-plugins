@@ -117,7 +117,7 @@ type HookGroup = {
 const CLAUDE_HOOK_EVENTS: Record<string, HookGroup[]> = {
   SessionStart: [
     {
-      matcher: "startup|resume|clear|compact",
+      matcher: "startup|resume|clear|compact|fork",
       hooks: [
         {
           type: "command",
@@ -986,6 +986,15 @@ for (const [label, source, expected] of [
 // would reject adding them but would report it as a set mismatch; these say why.
 assert(!codexEvents.includes("PostToolUseFailure"), "Codex does not support PostToolUseFailure");
 assert(!codexEvents.includes("SessionEnd"), "Codex does not support SessionEnd");
+// Not a claim about Codex at runtime — a CONFIGURATION pin recording why the two SessionStart
+// matchers above differ, so the asymmetry reads as deliberate rather than as drift. Codex declares
+// four SessionStart sources and no `fork` (codex-rs/hooks/src/events/session_start.rs); a forked
+// Codex thread arrives as `startup` or `resume` depending on the fork path, and both are already
+// matched. `fork` is Claude vocabulary only.
+assert(
+  !(codexHooks.hooks.SessionStart[0].matcher ?? "").split("|").includes("fork"),
+  "Codex declares no fork SessionStart source — a forked Codex thread arrives as startup or resume, so `fork` here would pin a value Codex never emits",
+);
 
 for (const command of [...hookScripts(claudeHooks), ...hookScripts(codexHooks)]) {
   const match = command.match(/hooks\/(brains-[a-z-]+\.sh)/);
