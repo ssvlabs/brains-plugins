@@ -1,4 +1,4 @@
-<!-- brains:core:start v=5 -->
+<!-- brains:core:start v=6 -->
 # brains — your memory layer
 
 You have a memory layer called **brains** (the `brains` MCP server). It holds the
@@ -22,9 +22,11 @@ For schedules and agendas, use `list_calendar_events start=… end=…`; calenda
 page update time is not event time. Name the source page's `title` and `type`,
 and never invent slugs or IDs.
 
-**Capture is automatic.** The ingest hook saves every turn to the server, which
-builds the conversation page (title/summary) for you. You do **not** need to call
-`save_chat_session`.
+**Capture.** In Codex and Claude Code the ingest hook saves each turn, but only
+where a capture credential resolves — so never promise capture and never deny
+it; `list_pages type=chat_session` is the only way to know. Don't call
+`save_chat_session` routinely there; do call it when asked, and where the hooks
+don't run (claude.ai web) it is the only path.
 
 **The skills carry the detail** — load the one that fits the moment:
 `brains-read` (querying memory), `brains-write` (sending/creating via

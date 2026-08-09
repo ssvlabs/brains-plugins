@@ -1,8 +1,10 @@
 # brains — Codex and Claude Code plugin
 
 Your memory layer for Codex and Claude Code: Gmail, Calendar, Drive, and prior
-AI conversations as queryable pages — with reflexive recall, turn-by-turn
-capture, a server-driven inbox, boards, automations, and workflows on top.
+AI conversations as queryable pages — with reflexive recall, hook-driven
+turn-by-turn capture and inbox delivery, boards, automations, and workflows
+on top. The same server also backs claude.ai, where no hooks run — see
+[Install for claude.ai web](#install-for-claudeai-web).
 
 The Codex and Claude packages share the same seven skills, core prompt, hook
 scripts, and inbox engine. Only their manifests, hook event maps, and MCP
@@ -33,8 +35,9 @@ expected. Codex stores the credential itself, so there is nothing to copy or
 keep. Confirm with `codex mcp list`: brains should read **OAuth**.
 
 Restart the ChatGPT desktop app or start a new Codex thread. The first time the
-plugin loads, open `/hooks` and trust the bundled brains hooks so automatic
-recall, capture, inbox delivery, and error feedback can run.
+plugin loads, open `/hooks` and trust the bundled brains hooks — that is what
+runs automatic recall and error feedback. Capture and inbox delivery also need a
+capture credential — normally the token below.
 
 Everyday reading and writing is covered by default. For admin-gated tools or
 performance insights, sign in asking for them explicitly (both also need the
@@ -75,6 +78,9 @@ launchctl setenv BRAINS_API_TOKEN "<your token>"
 This token is only for capture and the inbox. It is **not** how Codex
 authenticates the brains tools — that is `codex mcp login brains` above.
 
+Running your own brains server? Set `BRAINS_ENDPOINT` alongside it — see
+[Self-hosting](#self-hosting).
+
 ## Install for Claude Code
 
 No token needed — Claude Code signs itself in.
@@ -98,7 +104,8 @@ This flow was verified on Claude Code 2.1.220. If `claude mcp login` is not a re
 command, update Claude Code.
 
 Restart Claude Code or start a new session. The first time the plugin loads, trust the bundled
-brains hooks so automatic recall, capture, inbox delivery, and error feedback can run.
+brains hooks — that is what runs automatic recall and error feedback. Capture and inbox delivery
+also need the token below.
 
 For a local checkout under development:
 
@@ -139,7 +146,41 @@ claude mcp login plugin:brains:brains
 
 Then run `/reload-plugins`.
 
-### Self-hosting
+## Install for claude.ai web
+
+claude.ai does not run this repo's hooks, so the capture that Codex and Claude
+Code get from `hooks/` does not happen there. Two ways in, both covered step by
+step at <https://app.mybrains.ai/install/claude-web>:
+
+- **Custom connector** — add `https://mcp.mybrains.ai/mcp` and approve the OAuth
+  screen. This is the path we verified end to end.
+- **Full plugin** — add this repository as a marketplace and install from it.
+  Paid plans only; it also brings the skills. The hooks it lists stay inert.
+
+Recall works: ask about a person, project or past conversation and Claude
+reaches for brains on its own.
+
+**Capture is different — ask for it.** On claude.ai a conversation is saved only
+when Claude calls `save_chat_session`. Say "save this chat to brains" and it
+does; that is the dependable way, and the way to treat anything you want kept.
+
+With the install guide's instruction block in place Claude also saves on its own
+sometimes — but only sometimes, and in testing it once said it was saving
+without actually doing so. Don't rely on it, and don't take the sentence in the
+chat as proof: `list_pages type=chat_session`, or just ask brains which chats it
+has, is the only real confirmation.
+
+## Shared layout
+
+- `.agents/plugins/marketplace.json` — Codex marketplace
+- `.claude-plugin/marketplace.json` — Claude Code marketplace
+- `plugins/brains/.codex-plugin/plugin.json` — Codex manifest
+- `plugins/brains/.claude-plugin/plugin.json` — Claude Code manifest
+- `plugins/brains/.mcp.json` — Codex MCP declaration
+- `plugins/brains/skills/` — shared skills
+- `plugins/brains/hooks/` — shared scripts plus client-specific event maps
+
+## Self-hosting
 
 The brains tools connect to `https://mcp.mybrains.ai/mcp`; to point them at your own
 server, fork this repo, set the URL in `plugins/brains/.claude-plugin/plugin.json` and
@@ -160,16 +201,6 @@ an option you never set has no stored value — so the hooks fall back to
 Codex has no such option and runs the same hook scripts, so set `BRAINS_ENDPOINT` wherever
 you set `BRAINS_API_TOKEN` above — the shell Codex starts from, or the app's launch
 environment. Without it Codex capture keeps sending to `https://mcp.mybrains.ai` too.
-
-## Shared layout
-
-- `.agents/plugins/marketplace.json` — Codex marketplace
-- `.claude-plugin/marketplace.json` — Claude Code marketplace
-- `plugins/brains/.codex-plugin/plugin.json` — Codex manifest
-- `plugins/brains/.claude-plugin/plugin.json` — Claude Code manifest
-- `plugins/brains/.mcp.json` — Codex MCP declaration
-- `plugins/brains/skills/` — shared skills
-- `plugins/brains/hooks/` — shared scripts plus client-specific event maps
 
 ## License
 

@@ -24,6 +24,13 @@
 #
 # Usage:  scripts/generated-artifact-guard.sh [base-ref]     (default origin/main)
 #
+# Which digit to bump (convention, not enforced here — semver_gt below accepts
+# any forward move, on any digit): match this repo's own commit-type prefixes.
+# `fix(...)`: patch. `feat(...)`: minor. A declared breaking change to the
+# plugin's contract (MCP server URL, tool/skill names, config schema): major.
+# Past bumps in this repo are inconsistent with this rule — treat it as the
+# convention going forward, not a description of history.
+#
 # A guard that cannot fail loudly is not a guard. Three rules keep this one
 # honest, each earned from an observed false pass during review:
 #

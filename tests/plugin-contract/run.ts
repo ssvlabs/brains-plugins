@@ -39,6 +39,240 @@ const HOOK_ENV_ENDPOINT = "https://envvar-probe.example.test";
 const CLAUDE_LOOPBACK = "127.0.0.1";
 const CLAUDE_MCP_KEYS = ["type", "url"];
 const CLAUDE_OPTIONAL_HEADING = "### Optional:";
+// The qualifier the Claude surfaces must carry. It scopes capture and the inbox together, because
+// they share one credential gate and one delivery mechanism.
+const CAPTURE_QUALIFIER = "hook-driven turn-by-turn capture and inbox delivery";
+// Codex's card says it shorter: it qualifies capture and never claimed the inbox, so the same rule
+// lands on a different string. Reverting this one word — back to "automatic context and capture
+// plus" — was one of the two unpinned surfaces that restored the deleted claim with every gate green.
+const CODEX_CAPTURE_QUALIFIER = "hook-driven capture";
+
+// The four product descriptions, pinned VERBATIM. The qualifier check below is a signal, not the
+// guarantee: it reads what is LEFT once the approved phrase is removed, so a rewrite that keeps the
+// qualifier and then contradicts it — "…capture and inbox delivery — always on, no token or
+// configuration needed, in every chat including claude.ai…" — passes it, and so does one that avoids
+// both stems: "Every turn is recorded to brains and server messages reach your session on their
+// own." Both were demonstrated in review. These constants are what actually hold the copy.
+const CLAUDE_MANIFEST_DESCRIPTION =
+  "Your memory layer: Gmail, Calendar, Drive, and prior Claude conversations as queryable pages, " +
+  "with reflexive recall, hook-driven turn-by-turn capture and inbox delivery, and " +
+  "boards/automations/workflows on top.";
+const CLAUDE_MARKETPLACE_DESCRIPTION =
+  "Your memory layer: Gmail/Calendar/Drive and prior Claude conversations as queryable pages — " +
+  "reflexive recall, hook-driven turn-by-turn capture and inbox delivery, and " +
+  "boards/automations/workflows on top.";
+const CODEX_MANIFEST_DESCRIPTION =
+  "Your personal memory layer for Codex: query Gmail, Calendar, Drive, and prior conversations, " +
+  "then build boards, automations, and workflows.";
+const CODEX_LONG_DESCRIPTION =
+  "Query your Gmail, Calendar, Drive, and prior AI conversations from Codex, with automatic context " +
+  "and hook-driven capture plus boards, automations, workflows, and feedback flows.";
+// The rest of the copy on the same two cards. `shortDescription` is the reason the artifacts below
+// are pinned WHOLE rather than field by field: it was not in the inventory, and setting it to
+// "Automatic capture, no setup" reached the Codex card with every gate green.
+const CODEX_SHORT_DESCRIPTION = "Your personal memory layer";
+const CODEX_DISPLAY_NAME = "Brains";
+const CLAUDE_MARKETPLACE_BLURB = "The brains memory layer, as a Claude Code plugin.";
+
+// The COMPLETE hook event map per client: event -> the script that must run for it. Pinned as an
+// exact set rather than an includes-list because three holes sat under the old assertions, and each
+// one let published behaviour reach zero users with the suite green (#14):
+//
+//   1. AN EVENT COULD BE DELETED. Only PostToolUseFailure and SessionEnd were asserted for Claude —
+//      SessionStart, UserPromptSubmit and Stop never were. Deleting SessionStart passed both
+//      suites, and SessionStart is the ONLY delivery path for core.md (brains-start.sh:27 cats it).
+//      So every verbatim copy pin in this file proved the text was correct while nothing proved it
+//      ever loads. Guard-works is not guard-runs.
+//   2. AN EVENT COULD BE GUTTED. `includes("PostToolUseFailure")` is satisfied by the KEY existing,
+//      so `PostToolUseFailure: []` passed with its own assertion intact — the assertion guaranteed
+//      a name, not a hook.
+//   3. THE MAPPING WAS UNPINNED. Pointing SessionStart at brains-end.sh passed.
+//
+// Codex carried all three identically, so both maps are checked the same way. Adding or removing an
+// event is now a deliberate two-line edit — this constant and the JSON together — the same shape as
+// the copy pins above. The three positive `includes` assertions these replace are gone: exact-set
+// equality subsumes them, and keeping per-event positives for some events and not others is how the
+// gap formed in the first place.
+//
+// The value is the COMPLETE declared group array, not a {matcher, command} subset, because three more
+// holes sat under a subset check and each one was executed:
+//
+//   4. THE MATCHER WAS UNPINNED. Narrowing Claude's SessionStart to "resume" — or to a string that
+//      matches nothing — deletes core.md from every fresh session while every assertion here stays
+//      green. That is hole 1 wearing a different hat.
+//   5. THE COMMAND WAS MATCHED BY SUBSTRING. `includes("hooks/brains-start.sh")` is satisfied by a
+//      MENTION, so a second hook running something else with `# hooks/brains-start.sh` in a trailing
+//      comment passed. Commands are pinned whole, guard prefix included.
+//   6. EVERY OTHER KEY WAS INVISIBLE. `"type": "comand"` on Stop and `"timeout": 1` on SessionStart —
+//      a documented Claude field, which would cancel brains-start.sh mid-inbox-pull — both survived a
+//      subset pin AND `claude plugin validate --strict`. So the whole group array is compared, by
+//      canonical JSON: added, removed and retyped keys all fail.
+//
+// An absent matcher is asserted as an ABSENCE rather than as null: these events must run for EVERY
+// occurrence, and both a matcher and an explicit null narrow them.
+type HookGroup = {
+  matcher?: string;
+  hooks: { type: string; command: string; statusMessage?: string }[];
+};
+const CLAUDE_HOOK_EVENTS: Record<string, HookGroup[]> = {
+  SessionStart: [
+    {
+      matcher: "startup|resume|clear",
+      hooks: [
+        {
+          type: "command",
+          command: 'BRAINS_STATE_DIR="${CLAUDE_PLUGIN_DATA}" "${CLAUDE_PLUGIN_ROOT}"/hooks/brains-start.sh',
+        },
+      ],
+    },
+  ],
+  UserPromptSubmit: [
+    {
+      hooks: [
+        {
+          type: "command",
+          command: 'BRAINS_STATE_DIR="${CLAUDE_PLUGIN_DATA}" "${CLAUDE_PLUGIN_ROOT}"/hooks/brains-turn.sh',
+        },
+      ],
+    },
+  ],
+  Stop: [
+    {
+      hooks: [
+        {
+          type: "command",
+          command: 'BRAINS_STATE_DIR="${CLAUDE_PLUGIN_DATA}" "${CLAUDE_PLUGIN_ROOT}"/hooks/brains-turn.sh',
+        },
+      ],
+    },
+  ],
+  SessionEnd: [
+    {
+      hooks: [
+        {
+          type: "command",
+          command: 'BRAINS_STATE_DIR="${CLAUDE_PLUGIN_DATA}" "${CLAUDE_PLUGIN_ROOT}"/hooks/brains-end.sh',
+        },
+      ],
+    },
+  ],
+  PostToolUseFailure: [
+    {
+      matcher: "mcp__brains__.*",
+      hooks: [
+        {
+          type: "command",
+          command: 'BRAINS_STATE_DIR="${CLAUDE_PLUGIN_DATA}" "${CLAUDE_PLUGIN_ROOT}"/hooks/brains-tool-error.sh',
+        },
+      ],
+    },
+  ],
+};
+const CODEX_HOOK_EVENTS: Record<string, HookGroup[]> = {
+  SessionStart: [
+    {
+      matcher: "startup|resume|clear|compact",
+      hooks: [
+        {
+          type: "command",
+          command:
+            '[ -x "${PLUGIN_ROOT}/hooks/brains-start.sh" ] || exit 0; ' +
+            'BRAINS_STATE_DIR="${PLUGIN_DATA}" "${PLUGIN_ROOT}"/hooks/brains-start.sh',
+          statusMessage: "Loading brains memory",
+        },
+      ],
+    },
+  ],
+  UserPromptSubmit: [
+    {
+      hooks: [
+        {
+          type: "command",
+          command:
+            '[ -x "${PLUGIN_ROOT}/hooks/brains-turn.sh" ] || exit 0; ' +
+            'BRAINS_STATE_DIR="${PLUGIN_DATA}" "${PLUGIN_ROOT}"/hooks/brains-turn.sh',
+        },
+      ],
+    },
+  ],
+  Stop: [
+    {
+      hooks: [
+        {
+          type: "command",
+          command:
+            '[ -x "${PLUGIN_ROOT}/hooks/brains-turn.sh" ] || exit 0; ' +
+            'BRAINS_STATE_DIR="${PLUGIN_DATA}" "${PLUGIN_ROOT}"/hooks/brains-turn.sh',
+        },
+      ],
+    },
+  ],
+  PostToolUse: [
+    {
+      matcher: "mcp__brains__.*",
+      hooks: [
+        {
+          type: "command",
+          command:
+            '[ -x "${PLUGIN_ROOT}/hooks/brains-tool-error.sh" ] || exit 0; ' +
+            'BRAINS_STATE_DIR="${PLUGIN_DATA}" "${PLUGIN_ROOT}"/hooks/brains-tool-error.sh',
+        },
+      ],
+    },
+  ],
+};
+const CLAUDE_WEB_HEADING = "## Install for claude.ai web";
+// The one URL a web reader needs; the connector dialog takes it verbatim.
+const CLAUDE_WEB_GUIDE = "https://app.mybrains.ai/install/claude-web";
+
+// Approved claude.ai capture copy, pinned VERBATIM for the same reason as CLAUDE_INSTALL_REGION
+// below: keyword assertions on this section proved evadable in review. A rewrite reading
+// "Capture is handled automatically for you — Claude saves your conversations on its own, so
+// there is nothing to do. (Early builds fired only sometimes; if you are on one, say 'save this
+// chat to brains' or call save_chat_session, and check with list_pages type=chat_session.)"
+// satisfied EVERY signal check — each keyword survived inside a parenthetical while the meaning
+// was fully reversed. So the wording itself is the contract here too.
+//
+// What the wording encodes, measured live on claude.ai (2026-08-05): an explicit ask works;
+// unprompted capture fired on ONE of five passive trials; one trial announced a save it never
+// performed, which is why the copy tells the reader how to verify rather than merely disclaiming.
+// The named signal assertions further down are kept as well — they give a precise failure on a
+// legitimate edit, ahead of this whole-region diff.
+// Pinned WHOLE-SECTION, heading to the shared-layout heading. Pinning only the two capture
+// paragraphs left the intro, both install paths and the "Recall works" paragraph keyword-guarded
+// only — and that was enough to smuggle the claim back in a paragraph of its own. Appending this
+// after "Recall works" passed every check:
+//
+//   Capture works the same way: once connected, Claude saves your conversations to
+//   brains automatically, so there is nothing for you to do.
+//
+// A partial pin also made the guarantee easy to overstate in review. The section is short and
+// changing it is a two-line diff; there is no reason for any of it to be unpinned.
+const CLAUDE_WEB_REGION = [
+  CLAUDE_WEB_HEADING,
+  "",
+  "claude.ai does not run this repo's hooks, so the capture that Codex and Claude",
+  "Code get from `hooks/` does not happen there. Two ways in, both covered step by",
+  "step at <" + CLAUDE_WEB_GUIDE + ">:",
+  "",
+  "- **Custom connector** — add `" + CLAUDE_MCP_URL + "` and approve the OAuth",
+  "  screen. This is the path we verified end to end.",
+  "- **Full plugin** — add this repository as a marketplace and install from it.",
+  "  Paid plans only; it also brings the skills. The hooks it lists stay inert.",
+  "",
+  "Recall works: ask about a person, project or past conversation and Claude",
+  "reaches for brains on its own.",
+  "",
+  "**Capture is different — ask for it.** On claude.ai a conversation is saved only",
+  "when Claude calls `save_chat_session`. Say \"save this chat to brains\" and it",
+  "does; that is the dependable way, and the way to treat anything you want kept.",
+  "",
+  "With the install guide's instruction block in place Claude also saves on its own",
+  "sometimes — but only sometimes, and in testing it once said it was saving",
+  "without actually doing so. Don't rely on it, and don't take the sentence in the",
+  "chat as proof: `list_pages type=chat_session`, or just ask brains which chats it",
+  "has, is the only real confirmation.",
+].join("\n");
 
 // Approved token copy, pinned verbatim. Hand-written phrasing checks proved both evadable and
 // prone to false positives, so the wording itself is the contract; the regex pair further down
@@ -74,6 +308,112 @@ const CLAUDE_VERSION_SHAPE = /\bv?\d+\.\d+(\.\d+)?\b/;
 const CLAUDE_FLOOR_VOCAB =
   /\b(minimum|at least|no older|requires?|or (a )?(newer|later)|and (later|up)|or above|and above)\b/i;
 
+// The README's opening paragraphs, pinned verbatim. This is a fixed product surface exactly like the
+// two cards — it is what a reader sees before any install step — and nothing pinned it, so reverting
+// three lines to the pre-PR intro ("reflexive recall, turn-by-turn capture, a server-driven inbox")
+// restored the deleted claim with all four gates green.
+const README_INTRO_REGION = [
+  "# brains — Codex and Claude Code plugin",
+  "",
+  "Your memory layer for Codex and Claude Code: Gmail, Calendar, Drive, and prior",
+  "AI conversations as queryable pages — with reflexive recall, hook-driven",
+  "turn-by-turn capture and inbox delivery, boards, automations, and workflows",
+  "on top. The same server also backs claude.ai, where no hooks run — see",
+  "[Install for claude.ai web](#install-for-claudeai-web).",
+  "",
+  "The Codex and Claude packages share the same seven skills, core prompt, hook",
+  "scripts, and inbox engine. Only their manifests, hook event maps, and MCP",
+  "authentication declarations are client-specific.",
+].join("\n");
+
+// The entire Codex install region, heading to its Optional heading, pinned verbatim for the same
+// reason as the Claude one below. Two literal bans were all that stood here, and a false promise
+// paraphrased around them passed the whole suite: "Once trusted, every conversation is captured
+// automatically — no token needed." dropped in after the trust paragraph is a claim this PR exists
+// to delete, on the surface a Codex user reads while deciding whether to trust the hooks.
+const CODEX_INSTALL_REGION = [
+  "## Install for Codex",
+  "",
+  "No token needed — Codex signs itself in.",
+  "",
+  "Needs Codex **" + CODEX_MIN_VERSION + "** or newer. Check with:",
+  "",
+  "```sh",
+  CODEX_CAPABILITY_PROBE,
+  "```",
+  "",
+  "If that errors with an unknown subcommand, run `codex update` first.",
+  "",
+  "```sh",
+  "codex plugin marketplace add ssvlabs/brains-plugins",
+  "codex plugin add brains@brains",
+  "codex mcp login brains",
+  "```",
+  "",
+  "`codex mcp login brains` opens your browser to approve the connection. The",
+  "approval screen says **An app on this computer** and shows a `127.0.0.1` address",
+  "whose port changes every time — that is Codex waiting on your machine, and it is",
+  "expected. Codex stores the credential itself, so there is nothing to copy or",
+  "keep. Confirm with `codex mcp list`: brains should read **OAuth**.",
+  "",
+  "Restart the ChatGPT desktop app or start a new Codex thread. The first time the",
+  "plugin loads, open `/hooks` and trust the bundled brains hooks — that is what",
+  "runs automatic recall and error feedback. Capture and inbox delivery also need a",
+  "capture credential — normally the token below.",
+  "",
+  "Everyday reading and writing is covered by default. For admin-gated tools or",
+  "performance insights, sign in asking for them explicitly (both also need the",
+  "matching access on your account):",
+  "",
+  "```sh",
+  "codex mcp login brains --scopes read,write,admin",
+  "codex mcp login brains --scopes read,write,perf_insights",
+  "```",
+  "",
+  "For a local checkout under development:",
+  "",
+  "```sh",
+  "codex plugin marketplace add /absolute/path/to/brains-plugins",
+  "codex plugin add brains@brains",
+  "codex mcp login brains",
+  "```",
+].join("\n");
+
+// The Codex token section, heading line INCLUDED. It was left unpinned on the argument that "token"
+// is legitimate here — it IS the token section — so pinning would freeze docs that should stay
+// editable. Two executed evasions retired that argument: the heading itself carries copy, and
+// rewriting it to "### Optional setup? No — this token is required for every brains feature" left
+// the `### Optional` needle counting once while inverting what the section says; and a capture
+// promise with neither stem ("Conversation capture is built in. It runs by itself for every
+// session, and server updates arrive there too.") passed the canary in the body. Editing stays
+// possible; it is now the deliberate two-line diff every other region in this file already demands.
+const CODEX_OPTIONAL_REGION = [
+  "### Optional: conversation capture and the inbox",
+  "",
+  "The tools above work without this. Capture and the inbox are shell hooks that",
+  "authenticate separately from the MCP server and cannot read the credential Codex",
+  "keeps internally, so they need a brains API token of their own — find it in your",
+  "brains account settings. Without one they simply stay off.",
+  "",
+  "```sh",
+  'export BRAINS_API_TOKEN="<your token>"',
+  "```",
+  "",
+  "That applies to Codex started from that shell. The macOS desktop app never",
+  "inherits a shell export, so set it for the app's launch environment instead and",
+  "restart the app:",
+  "",
+  "```sh",
+  'launchctl setenv BRAINS_API_TOKEN "<your token>"',
+  "```",
+  "",
+  "This token is only for capture and the inbox. It is **not** how Codex",
+  "authenticates the brains tools — that is `codex mcp login brains` above.",
+  "",
+  "Running your own brains server? Set `BRAINS_ENDPOINT` alongside it — see",
+  "[Self-hosting](#self-hosting).",
+].join("\n");
+
 // The entire region from the Claude install heading to the Optional heading, pinned verbatim.
 // Enumerated bans on this region kept losing to paraphrase, so the copy IS the contract.
 const CLAUDE_INSTALL_REGION = [
@@ -99,7 +439,8 @@ const CLAUDE_INSTALL_REGION = [
   CLAUDE_VERSION_NOTE,
   "",
   "Restart Claude Code or start a new session. The first time the plugin loads, trust the bundled",
-  "brains hooks so automatic recall, capture, inbox delivery, and error feedback can run.",
+  "brains hooks — that is what runs automatic recall and error feedback. Capture and inbox delivery",
+  "also need the token below.",
   "",
   "For a local checkout under development:",
   "",
@@ -109,6 +450,105 @@ const CLAUDE_INSTALL_REGION = [
   CLAUDE_MCP_LOGIN,
   "```",
 ].join("\n");
+
+// The Claude token section and the migration section, heading lines included, pinned for the same
+// reason as the Codex one above.
+const CLAUDE_OPTIONAL_REGION = [
+  "### Optional: conversation capture and the inbox",
+  "",
+  "The tools above work without this. Capture and the inbox are shell hooks that authenticate",
+  "separately from the MCP server and cannot read the credential Claude Code keeps internally, so",
+  "they need a brains API token of their own — find it in your brains account settings. Without one",
+  "they simply stay off.",
+  "",
+  "Set it when you install:",
+  "",
+  "```sh",
+  'claude plugin install brains@brains --config token="<your token>"',
+  "```",
+  "",
+  "Or change it afterwards with `/plugin` → brains → Configure.",
+  "",
+  "This token is only for capture and the inbox. It is **not** how Claude Code authenticates the",
+  "brains tools — that is `" + CLAUDE_MCP_LOGIN + "` above.",
+].join("\n");
+const CLAUDE_MIGRATION_REGION = [
+  "### Already installed?",
+  "",
+  "Plugins added before the sign-in flow carried the token in their MCP declaration and never",
+  "logged in. Update, then sign in:",
+  "",
+  "```sh",
+  "claude plugin marketplace update brains",
+  "claude plugin update brains",
+  CLAUDE_MCP_LOGIN,
+  "```",
+  "",
+  "Then run `/reload-plugins`.",
+].join("\n");
+
+// The file inventory and the licence pointer. Neither makes a claim a user acts on, but both are
+// pinned anyway so that the composition assert below can cover the WHOLE file: an unpinned region,
+// however inert its contents, is somewhere to write a capture promise (one was, in review).
+const SHARED_LAYOUT_REGION = [
+  "## Shared layout",
+  "",
+  "- `.agents/plugins/marketplace.json` — Codex marketplace",
+  "- `.claude-plugin/marketplace.json` — Claude Code marketplace",
+  "- `plugins/brains/.codex-plugin/plugin.json` — Codex manifest",
+  "- `plugins/brains/.claude-plugin/plugin.json` — Claude Code manifest",
+  "- `plugins/brains/.mcp.json` — Codex MCP declaration",
+  "- `plugins/brains/skills/` — shared skills",
+  "- `plugins/brains/hooks/` — shared scripts plus client-specific event maps",
+].join("\n");
+const LICENSE_REGION = ["## License", "", "[GPL-3.0](./LICENSE)"].join("\n");
+
+// The self-hosting section, pinned verbatim. Its claims are load-bearing in exactly the way the
+// endpoint config's description is — it names the fallback host by name and says which halves of the
+// install the `endpoint` option governs — and the endpoint probes at the bottom of this file prove
+// all of that about the CODE while nothing proved the prose still agreed with it. For a self-hoster
+// the failure is silent: data going to production, not an error.
+const SELF_HOSTING_REGION = [
+  "## Self-hosting",
+  "",
+  "The brains tools connect to `" + CLAUDE_MCP_URL + "`; to point them at your own",
+  "server, fork this repo, set the URL in `plugins/brains/.claude-plugin/plugin.json` and",
+  "`plugins/brains/.mcp.json`, and add your fork as the marketplace.",
+  "",
+  "That moves the tools only. Conversation capture and the inbox read the `endpoint` option",
+  "instead, so set it when you install or they keep sending to `" + CLAUDE_ENDPOINT + "`:",
+  "",
+  "```sh",
+  "claude plugin install brains@brains --config endpoint=https://your-server",
+  "```",
+  "",
+  "Changing `endpoint`'s `default` in your fork does not cover this. Claude Code exports",
+  "`CLAUDE_PLUGIN_OPTION_ENDPOINT` to the hooks from the value stored in your settings, and",
+  "an option you never set has no stored value — so the hooks fall back to",
+  "`" + CLAUDE_ENDPOINT + "` while your tools talk to your own server.",
+  "",
+  "Codex has no such option and runs the same hook scripts, so set `BRAINS_ENDPOINT` wherever",
+  "you set `BRAINS_API_TOKEN` above — the shell Codex starts from, or the app's launch",
+  "environment. Without it Codex capture keeps sending to `" + CLAUDE_ENDPOINT + "` too.",
+].join("\n");
+
+// Best-effort canary over the WHOLE README, in the shape of the core.md backstop further down:
+// neither sound nor complete, but it catches the canonical regression — capture or the inbox
+// presented as unconditional. Every region is pinned now, so its job is no longer to cover unpinned
+// prose; it is the backstop for a rewrite that edits a region constant in the same diff, which is
+// the one move every verbatim pin in this file is blind to. Kept deliberately weak-but-broad for
+// that reason: it caught "Once trusted, every conversation is captured automatically — no token
+// needed." while a pin would have been edited around it. It is NOT a substitute for the pins — the
+// paraphrase "Conversation capture is built in. It runs by itself for every session." carries
+// neither pattern and walked straight past it.
+const UNCONDITIONAL_CAPTURE = [
+  /captur\w*[^.]{0,60}\bautomatic/i,
+  /\bautomatic(ally)?\b[^.]{0,60}captur/i,
+  /\b(saves|records|captures)\s+(every|each)\s+(turn|conversation|chat|message)\b/i,
+  /\bevery\s+(turn|conversation|chat|message)\b[^.]{0,60}\b(is|are)\s+(captured|recorded|saved)\b/i,
+  /(captur\w*|inbox)[^.]{0,80}\b(no token|without a token|nothing to configure|no configuration|always on)\b/i,
+  /\b(no token|nothing to configure|always on)\b[^.]{0,80}(captur\w*|inbox)/i,
+];
 
 class AssertionError extends Error {}
 
@@ -138,11 +578,183 @@ const normalizeCopy = (value: string): string => value.replace(/\s+/g, " ").trim
 // .editorconfig that would ever introduce benign churn. Line endings only.
 const normalizeRegion = (value: string): string => value.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
 
+// Key ORDER is not part of a JSON contract; every other difference is. Sorting keys recursively lets
+// a shape pin ignore reordering and catch an added, removed or retyped key.
+const canonicalJson = (value: unknown): string =>
+  JSON.stringify(value, (_key, val) =>
+    val !== null && typeof val === "object" && !Array.isArray(val)
+      ? Object.fromEntries(Object.keys(val).sort().map((k) => [k, (val as any)[k]]))
+      : val,
+  );
+
+// The named signal ahead of the verbatim description pins: a capture or inbox claim on a fixed
+// product surface must carry the hook-driven qualifier, and neither stem may appear outside it.
+// This is a SIGNAL, not the guarantee. It reads the RESIDUE — what is left once the approved phrase
+// is removed — so it catches the pre-PR copy ("reflexive recall, turn-by-turn capture, a
+// server-driven inbox") and a loose stem in any rewording that keeps one, while it is blind to a
+// claim that keeps the qualifier and then contradicts it ("…— always on, no token or configuration
+// needed…") and to one that avoids both stems ("Every turn is recorded to brains"). Both were
+// demonstrated against it in review, which is why every caller pins its copy verbatim as well; this
+// says WHICH rule a legitimate edit broke, in one line, before the reader gets a two-string diff.
+// The enumerated `server-driven inbox` ban it replaces is folded in — that regex caught exactly that
+// one string, and the residue covers it plus every rewording that leaves a stem loose.
+// A null qualifier means the surface makes no such claim today and must not start.
+function assertCaptureQualified(
+  surface: string,
+  text: unknown,
+  qualifier: string | null,
+  alsoAllowed: string[] = [],
+): void {
+  assert(typeof text === "string" && text !== "", `${surface} must carry a description`);
+  const copy = normalizeCopy(text as string);
+  if (qualifier !== null) {
+    assert(
+      copy.includes(qualifier),
+      `${surface} must carry the approved qualifier "${qualifier}" — a bare capture or inbox claim is false for every user without a credential, and in every claude.ai chat`,
+    );
+  }
+  let residue = copy;
+  for (const approved of [...(qualifier === null ? [] : [qualifier]), ...alsoAllowed]) {
+    residue = residue.split(approved).join(" ");
+  }
+  for (const [claim, pattern] of [["capture", /captur/i], ["the inbox", /\binbox\b/i]] as const) {
+    assert(
+      !pattern.test(residue),
+      `${surface} claims ${claim} outside the approved qualifier — it is hook-driven, credential-gated, and runs in no web chat. Unqualified: ${JSON.stringify(residue)}`,
+    );
+  }
+}
+
+// Every slice boundary in this file resolves through here, at the START OF A LINE. Raw `indexOf`
+// takes any occurrence, including one glued mid-line: appending "## Shared layout" with no space to
+// the last sentence of the web section ("…confirmation.## Shared layout") moved the boundary onto
+// the decoy, left the pinned slice matching exactly, and put every paragraph after it outside all
+// regions — while the line-anchored uniqueness count below never saw a second heading.
+const headingPattern = (heading: string): RegExp =>
+  new RegExp(`^${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gm");
+const headingIndex = (scope: string, heading: string): number =>
+  headingPattern(heading).exec(scope)?.index ?? -1;
+
+type Fence = { language: string; body: string };
+
+// ONE pass over every fence, because discovery and extraction disagreeing is the bug: the fence
+// allow-list lower-cased the language while the extractor did not, so ```Bash was certified as swept
+// and then never parsed. Tilde fences and info strings were invisible to both — ```sh title=install
+// matched neither the `^```([a-zA-Z0-9_-]+)$` discovery pattern nor the ```sh\n extractor. The lines
+// OUTSIDE every fence come back too, so the container-context check further down needs no second scan.
+// CommonMark, to the extent this file needs it: an opener is three or more backticks or tildes
+// indented at most three spaces, the language is the FIRST word of the info string, and a closer is
+// the same character, at least as long, carrying no info string.
+function markdownFences(markdown: string): { fences: Fence[]; outside: string[] } {
+  const fences: Fence[] = [];
+  const outside: string[] = [];
+  let open: { marker: string; language: string; body: string[] } | null = null;
+  for (const line of markdown.split("\n")) {
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (open) {
+      const closes = fence
+        && fence[1][0] === open.marker[0]
+        && fence[1].length >= open.marker.length
+        && fence[2].trim() === "";
+      if (closes) {
+        fences.push({ language: open.language, body: open.body.map((body) => `${body}\n`).join("") });
+        open = null;
+      } else {
+        open.body.push(line);
+      }
+      continue;
+    }
+    outside.push(line);
+    if (fence) {
+      open = { marker: fence[1], language: fence[2].trim().split(/\s+/)[0].toLowerCase(), body: [] };
+    }
+  }
+  assert(open === null, "README has an unclosed code fence — the sweep cannot see inside it");
+  return { fences, outside };
+}
+
 function hookScripts(config: any): string[] {
   return Object.values(config.hooks ?? {}).flatMap((groups: any) =>
     groups.flatMap((group: any) => group.hooks ?? [])
       .map((hook: any) => hook.command as string),
   );
+}
+
+// Deliberately NOT folded into hookScripts(): that helper flattens every event into one command
+// list, which is exactly what the callers below want and exactly what loses the event identity this
+// check needs. A vacuous `SessionStart: []` contributes nothing to the flattened list and is
+// therefore invisible to any assertion built on it — which is how hole 2 survived.
+function assertHookEventMap(label: string, config: any, expected: Record<string, HookGroup[]>): void {
+  const declared = Object.keys(config.hooks ?? {}).sort();
+  const wanted = Object.keys(expected).sort();
+  assert(
+    JSON.stringify(declared) === JSON.stringify(wanted),
+    `${label} hook events must be exactly [${wanted.join(", ")}] — got [${declared.join(", ") || "none"}]. `
+      + `Adding or removing one is a two-line edit: this JSON and ${label.toUpperCase()}_HOOK_EVENTS.`,
+  );
+  for (const [event, groups] of Object.entries(expected)) {
+    const declaredGroups = config.hooks[event];
+    assert(
+      Array.isArray(declaredGroups),
+      `${label} ${event} must declare an array of matcher groups — got ${JSON.stringify(declaredGroups)}`,
+    );
+    assert(
+      declaredGroups.length === groups.length,
+      `${label} ${event} must declare exactly ${groups.length} matcher group(s) — got ${declaredGroups.length}. `
+        + `An empty array satisfies a key-existence check and runs nothing; a second group is a second delivery path, and a duplicate is a doubled one.`,
+    );
+    groups.forEach((group, index) => {
+      const declaredGroup = declaredGroups[index];
+      assert(
+        declaredGroup !== null && typeof declaredGroup === "object",
+        `${label} ${event} group ${index} must be an object — got ${JSON.stringify(declaredGroup)}`,
+      );
+      if (group.matcher === undefined) {
+        assert(
+          !("matcher" in declaredGroup),
+          `${label} ${event} group ${index} must declare NO matcher — it runs on every ${event}, and both a matcher and an explicit null narrow it`,
+        );
+      } else {
+        assert(
+          declaredGroup.matcher === group.matcher,
+          `${label} ${event} group ${index} matcher must be exactly "${group.matcher}" — got ${JSON.stringify(declaredGroup.matcher)}. `
+            + `Narrowing it drops deliveries silently, and a matcher that matches nothing runs nothing.`,
+        );
+      }
+      const declaredHooks = declaredGroup.hooks;
+      assert(
+        Array.isArray(declaredHooks),
+        `${label} ${event} group ${index} must declare an array of hooks — got ${JSON.stringify(declaredHooks)}`,
+      );
+      for (const hook of declaredHooks) {
+        assert(
+          hook !== null && typeof hook === "object" && typeof hook.command === "string",
+          `${label} ${event} group ${index} declares a hook with no string command — got ${JSON.stringify(hook)}`,
+        );
+      }
+      const declaredCommands = declaredHooks.map((hook: any) => hook.command as string);
+      const wantedCommands = group.hooks.map((hook) => hook.command);
+      // Named signal ahead of the two pins below: a mis-mapped event (hole 3) reads as one line here
+      // rather than as a two-string diff the reader has to spot for themselves.
+      wantedCommands.forEach((command, hookIndex) => {
+        const script = command.match(/hooks\/(brains-[a-z-]+\.sh)/)?.[1];
+        assert(script, `${label} ${event} expectation names no brains script — fix ${label.toUpperCase()}_HOOK_EVENTS`);
+        assert(
+          declaredCommands[hookIndex]?.includes(`hooks/${script}`),
+          `${label} ${event} must run ${script} — got: ${declaredCommands[hookIndex]}`,
+        );
+      });
+      assert(
+        JSON.stringify(declaredCommands) === JSON.stringify(wantedCommands),
+        `${label} ${event} group ${index} must run exactly ${JSON.stringify(wantedCommands)} — got ${JSON.stringify(declaredCommands)}`,
+      );
+    });
+    assert(
+      canonicalJson(declaredGroups) === canonicalJson(groups),
+      `${label} ${event} must declare exactly this shape — a key outside matcher and command changes what runs (type, statusMessage, timeout):\n`
+        + `expected ${canonicalJson(groups)}\ngot      ${canonicalJson(declaredGroups)}`,
+    );
+  }
 }
 
 const claudeManifest = readJson(join(PLUGIN, ".claude-plugin", "plugin.json"));
@@ -153,6 +765,8 @@ const claudeHooks = readJson(join(PLUGIN, "hooks", "claude-hooks.json"));
 const codexHooks = readJson(join(PLUGIN, "hooks", "hooks.json"));
 const codexMcp = readJson(join(PLUGIN, ".mcp.json"));
 const claudeManifestSource = readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8");
+const claudeHooksSource = readFileSync(join(PLUGIN, "hooks", "claude-hooks.json"), "utf8");
+const codexHooksSource = readFileSync(join(PLUGIN, "hooks", "hooks.json"), "utf8");
 const turnHook = readFileSync(join(PLUGIN, "hooks", "brains-turn.sh"), "utf8");
 const inboxHook = readFileSync(join(PLUGIN, "hooks", "lib", "brains-inbox.sh"), "utf8");
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
@@ -171,6 +785,157 @@ assert(codexManifest.skills === "./skills/", "Codex must use the shared skills d
 assert(codexManifest.mcpServers === "./.mcp.json", "Codex must load its MCP declaration");
 assert(!("hooks" in codexManifest), "Codex should discover the default hooks/hooks.json");
 
+// Capture AND the inbox are hook-driven and credential-gated: brains-turn.sh and
+// brains-inbox.sh carry the same `[ -z "$TOKEN" ] && exit 0`, and neither runs in claude.ai chat.
+// Both Claude card surfaces said "hook-driven turn-by-turn capture, a server-driven inbox" —
+// qualifying only the first half, which left the inbox asserted flat in exactly the two
+// configurations where it is off. Nothing pinned any of these descriptions, which is how three of
+// them drifted into agreement on the same false claim in the first place.
+//
+// All four are checked twice: the qualifier signal names which rule broke, then the verbatim pin
+// holds the copy. The signal alone is not enough and this was demonstrated, not theorised — a
+// description that carries the qualifier and then contradicts it, and one that drops both stems,
+// each passed the signal with the meaning reversed. The Codex card is qualified more narrowly
+// because it claims less: its longDescription says "hook-driven capture" and its description makes
+// no capture or inbox claim at all, so the null arm asserts that it does not start making one.
+for (const [surface, description, qualifier, approved] of [
+  ["Claude manifest", claudeManifest.description, CAPTURE_QUALIFIER, CLAUDE_MANIFEST_DESCRIPTION],
+  ["Claude marketplace", claudeMarketplace.description, null, CLAUDE_MARKETPLACE_BLURB],
+  ["Claude marketplace card", claudeMarketplace.plugins[0]?.description, CAPTURE_QUALIFIER, CLAUDE_MARKETPLACE_DESCRIPTION],
+  ["Codex manifest", codexManifest.description, null, CODEX_MANIFEST_DESCRIPTION],
+  ["Codex manifest interface.longDescription", codexManifest.interface?.longDescription, CODEX_CAPTURE_QUALIFIER, CODEX_LONG_DESCRIPTION],
+  ["Codex manifest interface.shortDescription", codexManifest.interface?.shortDescription, null, CODEX_SHORT_DESCRIPTION],
+  ["Codex manifest interface.displayName", codexManifest.interface?.displayName, null, CODEX_DISPLAY_NAME],
+  ["Codex marketplace interface.displayName", codexMarketplace.interface?.displayName, null, CODEX_DISPLAY_NAME],
+] as const) {
+  assertCaptureQualified(surface, description, qualifier);
+  assert(
+    normalizeCopy(description as string) === approved,
+    `${surface} description must match the approved copy exactly (the card and its constant at the top of this file must be edited together)`,
+  );
+}
+// The Codex marketplace card carries NO description today. One appearing later would be a fifth
+// product surface arriving unpinned — precisely the state the four above were in — so it has to
+// arrive with its own constant and its own pin rather than on its own.
+assert(
+  !("description" in (codexMarketplace.plugins[0] ?? {})),
+  "Codex marketplace card must carry no description — a new one is a new product surface and needs its own verbatim pin here",
+);
+// One plugin per marketplace. Every check that reads `plugins[0]` — the card description above, the
+// source and policy checks below — is blind to a second entry, which would ship its own name,
+// description and source to the same users.
+for (const [label, marketplace] of [
+  ["Claude", claudeMarketplace],
+  ["Codex", codexMarketplace],
+] as const) {
+  assert(
+    Array.isArray(marketplace.plugins) && marketplace.plugins.length === 1,
+    `${label} marketplace must list exactly one plugin — everything here reads plugins[0], so a second entry ships unread (got ${marketplace.plugins?.length ?? "none"})`,
+  );
+}
+
+// The four published JSON artifacts, pinned WHOLE by canonical JSON. Every assertion above names a
+// field somebody thought of; this names the file. `interface.shortDescription` is why: it was in
+// neither the copy inventory nor any allow-list, so setting it to "Automatic capture, no setup"
+// reached the Codex card with all four gates green. Field-by-field inventories only ever cover the
+// fields already known — the same argument that made CORE_BODY the whole file and the README the
+// composition of its regions. A key added to any of these now fails here rather than shipping
+// unread, and the named assertions above stay ahead to say WHICH rule broke.
+//
+// `version` is read from the file rather than pinned: bumping it is the delivery guard's business,
+// and the two manifests' agreement is already asserted at the top of this file. Everything else —
+// author, homepage, keywords, capabilities, defaultPrompt, brandColor, the endpoint config's title,
+// the marketplace schema and owner — is copy or contract that reaches a user and nothing else read.
+const CLAUDE_MANIFEST = {
+  name: "brains",
+  description: CLAUDE_MANIFEST_DESCRIPTION,
+  version: claudeManifest.version,
+  author: { name: "brains (ssvlabs)" },
+  homepage: "https://mybrains.ai",
+  hooks: "./hooks/claude-hooks.json",
+  userConfig: {
+    token: {
+      type: "string",
+      title: CLAUDE_TOKEN_TITLE,
+      description: CLAUDE_TOKEN_DESCRIPTION,
+      sensitive: true,
+      required: false,
+    },
+    endpoint: {
+      type: "string",
+      title: "brains endpoint",
+      description: CLAUDE_ENDPOINT_DESCRIPTION,
+      default: CLAUDE_ENDPOINT,
+    },
+  },
+  mcpServers: { brains: { type: "http", url: CLAUDE_MCP_URL } },
+};
+const CODEX_MANIFEST = {
+  name: "brains",
+  version: codexManifest.version,
+  description: CODEX_MANIFEST_DESCRIPTION,
+  author: { name: "brains (ssvlabs)", url: "https://mybrains.ai" },
+  homepage: "https://mybrains.ai",
+  repository: "https://github.com/ssvlabs/brains-plugins",
+  license: "GPL-3.0",
+  keywords: ["memory", "productivity", "gmail", "calendar", "drive", "automation"],
+  skills: "./skills/",
+  mcpServers: "./.mcp.json",
+  interface: {
+    displayName: CODEX_DISPLAY_NAME,
+    shortDescription: CODEX_SHORT_DESCRIPTION,
+    longDescription: CODEX_LONG_DESCRIPTION,
+    developerName: "ssvlabs",
+    category: "Productivity",
+    capabilities: ["Read", "Write", "Automate"],
+    websiteURL: "https://mybrains.ai",
+    defaultPrompt: [
+      "What should I know about today?",
+      "Find what I discussed about this project.",
+      "Help me build a tracker from my memory.",
+    ],
+    brandColor: "#6D5EF5",
+  },
+};
+const CLAUDE_MARKETPLACE = {
+  $schema: "https://anthropic.com/claude-code/marketplace.schema.json",
+  name: "brains",
+  description: CLAUDE_MARKETPLACE_BLURB,
+  owner: { name: "ssvlabs" },
+  plugins: [
+    {
+      name: "brains",
+      description: CLAUDE_MARKETPLACE_DESCRIPTION,
+      source: "./plugins/brains",
+      category: "productivity",
+    },
+  ],
+};
+const CODEX_MARKETPLACE = {
+  name: "brains",
+  interface: { displayName: CODEX_DISPLAY_NAME },
+  plugins: [
+    {
+      name: "brains",
+      source: { source: "local", path: "./plugins/brains" },
+      policy: { installation: "AVAILABLE", authentication: "ON_USE" },
+      category: "Productivity",
+    },
+  ],
+};
+for (const [artifact, declared, approved] of [
+  [".claude-plugin/plugin.json", claudeManifest, CLAUDE_MANIFEST],
+  [".codex-plugin/plugin.json", codexManifest, CODEX_MANIFEST],
+  [".claude-plugin/marketplace.json", claudeMarketplace, CLAUDE_MARKETPLACE],
+  [".agents/plugins/marketplace.json", codexMarketplace, CODEX_MARKETPLACE],
+] as const) {
+  assert(
+    canonicalJson(declared) === canonicalJson(approved),
+    `${artifact} must match the approved artifact exactly — every field in it is published, so a new or edited one is a new claim:\n`
+      + `expected ${canonicalJson(approved)}\ngot      ${canonicalJson(declared)}`,
+  );
+}
+
 assert(claudeMarketplace.plugins[0]?.source === "./plugins/brains", "Claude marketplace source mismatch");
 assert(codexMarketplace.plugins[0]?.source?.path === "./plugins/brains", "Codex marketplace source mismatch");
 assert(codexMarketplace.plugins[0]?.policy?.installation === "AVAILABLE", "Codex install policy missing");
@@ -186,9 +951,35 @@ assert(codexMarketplace.plugins[0]?.policy?.authentication === "ON_USE", "Codex 
 
 const claudeEvents = Object.keys(claudeHooks.hooks).sort();
 const codexEvents = Object.keys(codexHooks.hooks).sort();
-assert(claudeEvents.includes("PostToolUseFailure"), "Claude failure hook missing");
-assert(claudeEvents.includes("SessionEnd"), "Claude session-end hook missing");
-assert(codexEvents.includes("PostToolUse"), "Codex tool-result hook missing");
+assertHookEventMap("Claude", claudeHooks, CLAUDE_HOOK_EVENTS);
+assertHookEventMap("Codex", codexHooks, CODEX_HOOK_EVENTS);
+// One key, one map. The event map is checked key by key above; nothing looked at the object around
+// it, so a stray root key would ship unread — the same class the artifact pins below close.
+for (const [label, config] of [["Claude", claudeHooks], ["Codex", codexHooks]] as const) {
+  assert(
+    JSON.stringify(Object.keys(config)) === JSON.stringify(["hooks"]),
+    `${label} hooks file may only contain hooks — got ${Object.keys(config).join(", ")}`,
+  );
+}
+// JSON.parse keeps the LAST duplicate key, so the parsed view above is blind to a first
+// "SessionStart" block that a later clean one shadows — and to a second root "hooks" object, whose
+// shadowed events would still be counted here. Count the declarations in the source, the way the
+// Claude manifest's mcpServers is counted below.
+for (const [label, source, expected] of [
+  ["Claude", claudeHooksSource, CLAUDE_HOOK_EVENTS],
+  ["Codex", codexHooksSource, CODEX_HOOK_EVENTS],
+] as const) {
+  for (const event of Object.keys(expected)) {
+    const declarations = (source.match(new RegExp(`"${event}"\\s*:`, "g")) ?? []).length;
+    assert(
+      declarations === 1,
+      `${label} hooks source must declare "${event}" exactly once — JSON.parse keeps the last duplicate, so a shadowed first copy is invisible to every check above (found ${declarations})`,
+    );
+  }
+}
+// Kept, and deliberately redundant with the exact-set check above: these two absences are a
+// CAPABILITY fact — Codex supports neither event — not a gap waiting to be filled. The set check
+// would reject adding them but would report it as a set mismatch; these say why.
 assert(!codexEvents.includes("PostToolUseFailure"), "Codex does not support PostToolUseFailure");
 assert(!codexEvents.includes("SessionEnd"), "Codex does not support SessionEnd");
 
@@ -476,7 +1267,7 @@ if (!claudeOnPath) {
   }
 }
 
-assert(core.includes("<!-- brains:core:start v=5 -->"), "core marker must be v5");
+assert(core.includes("<!-- brains:core:start v=6 -->"), "core marker must be v6");
 for (const signal of [
   "Query brains reflexively",
   "list_calendar_events",
@@ -492,9 +1283,125 @@ for (const signal of [
   "note the error and what you were doing",
   "Do not attach it to unrelated later feedback",
   "Once per session, when natural, mention `brains-feedback`",
+  // The capture rule must stay conditional on BOTH axes. Nothing pinned it before, which is
+  // how "Capture is automatic … You do not need to call save_chat_session" survived here
+  // while being false in two shipped configurations at once:
+  //   1. no hooks at all — claude.ai web, on either install path;
+  //   2. hooks present but capture unconfigured — brains-turn.sh:43 exits early with no token,
+  //      and that token is `required: false`. brains-start.sh:27 cats core.md with NO token
+  //      check, so precisely those users are the ones who read the claim.
+  // Both axes get a signal: a rewrite dropping either one re-promises capture to a real user
+  // who is not getting it.
+  "only where a capture credential resolves",
+  "never promise capture and never deny it",
+  "where the hooks don't run",
+  // And the prohibition must stay NARROW. A blanket "do not call save_chat_session" suppressed
+  // the tool even when the user asked for it outright — on claude.ai that ask is the one path
+  // measured to work reliably.
+  "do call it when asked",
 ]) {
   assert(coreNormalized.includes(signal), `compact core is missing routing/delegation signal: ${signal}`);
 }
+// The strong guarantee: the capture paragraph, VERBATIM.
+//
+// The keyword signals above are not sufficient and this was demonstrated, not theorised. This
+// paragraph keeps all of them, dodges every literal the old backstop banned, and passed the suite:
+//
+//   **Capture.** Capture happens automatically for you in Codex and Claude Code —
+//   the ingest hook saves each turn (only when the user configured capture, which is
+//   the default, so you can assume it is on). Don't call `save_chat_session` there; …
+//
+// That is the exact false promise this contract exists to delete, restored and green — on the one
+// surface a model EXECUTES rather than reads, where a regression is silent capture loss for a real
+// user. Verbatim pinning costs nothing here: editing core.md is already a deliberate act because it
+// forces the `v=` marker bump and both suites' marker assertions.
+const CORE_CAPTURE_REGION = [
+  "**Capture.** In Codex and Claude Code the ingest hook saves each turn, but only",
+  "where a capture credential resolves — so never promise capture and never deny",
+  "it; `list_pages type=chat_session` is the only way to know. Don't call",
+  "`save_chat_session` routinely there; do call it when asked, and where the hooks",
+  "don't run (claude.ai web) it is the only path.",
+].join("\n");
+// And the WHOLE injected body, verbatim, with the capture paragraph above composed into it rather
+// than pinned twice. brains-start.sh cats this file — all of it, not the capture paragraph — into
+// the model's context, so every unpinned line was somewhere to put back the promise the rest of this
+// PR deletes, and three ways of doing that were executed against the paragraph-only pin: appending
+// "**Capture, in practice.** Treat the ingest hook as reliable: it records each turn for you, so
+// there is no need to ask for a save." after the skills pointer; planting a decoy "**The skills
+// carry the detail**" that closed the pinned slice early; and reversing an unpinned line ("Treat it
+// as a first-class source of truth") with the v= marker left alone. The first stayed under the
+// 3,000-character budget at 2,893, so nothing else caught it either.
+//
+// Pinned as the whole FILE rather than the marker-delimited slice, because `cat` does not read the
+// markers: text above the start marker or below the end marker is injected just the same. The marker
+// line is inside the pin, so the v= bump both suites assert stays part of the same edit.
+const CORE_BODY = [
+  "<!-- brains:core:start v=6 -->",
+  "# brains — your memory layer",
+  "",
+  "You have a memory layer called **brains** (the `brains` MCP server). It holds the",
+  "user's Gmail, Calendar, Drive, and prior AI conversations as queryable pages.",
+  "Treat it as a first-class source of truth about the user's life and work.",
+  "",
+  "**Query brains reflexively.** If a request depends on a person, project,",
+  "meeting, email, document, prior discussion, or \"what did I see,\" look in brains",
+  "before guessing, asking the user, web search, browser fetches, or raw Google",
+  "connectors. Skip it for pure current-repository code, general knowledge,",
+  "explicit memory opt-out, or when brains is unavailable.",
+  "",
+  "**Use the cheapest useful read.** Cache `whoami` and `list_integrations` once",
+  "per session. Use `list_pages` for recents, `search` for exact terms, `query` for",
+  "conceptual requests, and `get_page` only after a result supplies a slug. If",
+  "expected Gmail, Calendar, or Drive data is missing, use",
+  "`fetch_from_integration`, then repeat the read and report a plain miss rather",
+  "than inventing a result. Chain dependent reads; don't fan them out.",
+  "",
+  "For schedules and agendas, use `list_calendar_events start=… end=…`; calendar",
+  "page update time is not event time. Name the source page's `title` and `type`,",
+  "and never invent slugs or IDs.",
+  "",
+  CORE_CAPTURE_REGION,
+  "",
+  "**The skills carry the detail** — load the one that fits the moment:",
+  "`brains-read` (querying memory), `brains-write` (sending/creating via",
+  "integrations), `brains-agenda` (schedule/plan shape), `brains-build`",
+  "(boards/automations/workflows), `brains-integrations` (install/upgrade),",
+  "`brains-nudges` (when to suggest a feature), and `brains-feedback` (reporting a",
+  "brains bug / giving feedback). Don't reproduce them here — open the skill.",
+  "",
+  "On a non-transient brains tool error or user frustration with brains, note the",
+  "error and what you were doing, then offer one quiet trailing line to report it,",
+  "at most once per distinct error. Do not attach it to unrelated later feedback.",
+  "Once per session, when natural, mention `brains-feedback`; load the skill before",
+  "filing because it owns the procedure and redaction rules.",
+  "",
+  "**Custom layer.** Your operator may ship a personal layer (voice, profile pages,",
+  "daily-loop overrides). The session-start hook injects it (`.codex/USER.md` or",
+  "`.claude/USER.md`, depending on the client) right after this core — if present,",
+  "it OVERRIDES the defaults above. Adopt it.",
+  "<!-- brains:core:end -->",
+].join("\n");
+const coreCaptureStart = core.indexOf("**Capture.**");
+const coreCaptureEnd = core.indexOf("**The skills carry the detail**");
+assert(coreCaptureStart > 0, "core must keep its capture paragraph");
+assert(
+  coreCaptureEnd > coreCaptureStart,
+  "core's capture paragraph must precede the skills pointer — the slice below depends on it",
+);
+assert(
+  normalizeRegion(core.slice(coreCaptureStart, coreCaptureEnd)) === CORE_CAPTURE_REGION,
+  "core's capture paragraph must match the approved wording exactly (core.md and CORE_CAPTURE_REGION must be edited together, and core.md's v= marker bumped)",
+);
+assert(
+  normalizeRegion(core) === CORE_BODY,
+  "core.md must match the approved body exactly — brains-start.sh cats the WHOLE file into the model's context, so every line of it is a published promise (core.md and CORE_BODY must be edited together, and core.md's v= marker bumped)",
+);
+// Belt and braces for a rewrite that edits the constant above too. Broader than the literals it
+// replaces: "Capture happens automatically" walked straight past a `capture is automatic` ban.
+assert(
+  !/captur\w*[^.]{0,40}automatic|saves every turn\b|assume it is on/i.test(core),
+  "core must not promise capture unconditionally — it needs the hooks AND a credential that resolves",
+);
 assert(core.length < 3_000, "always-loaded core must stay below 3,000 characters");
 
 // The public face is generated from the monorepo capability catalog. Verify its
@@ -670,14 +1577,36 @@ assert(!/act_on_integration[^.]{0,200}request=/.test(writeSkillNormalized), "fre
 // Resolve both delimiters before slicing. A missing end heading yields -1, and
 // `slice(start, -1)` would silently widen the region to almost the whole file —
 // every assertion below would then pass while reading the wrong section.
-const codexStart = readme.indexOf("## Install for Codex");
-const claudeStart = readme.indexOf("## Install for Claude Code");
+const codexStart = headingIndex(readme, "## Install for Codex");
+const claudeStart = headingIndex(readme, "## Install for Claude Code");
 assert(codexStart >= 0, "README must document a Codex install");
 assert(claudeStart >= 0, "README must document a Claude Code install");
 assert(
   claudeStart > codexStart,
   "README's Claude Code section must follow the Codex one — the Codex checks below slice between them",
 );
+// The opening paragraphs, signal then pin. See README_INTRO_REGION for what a revert of them looked
+// like. The one allowed exception names a file rather than a promise.
+const readmeIntro = readme.slice(0, codexStart);
+assertCaptureQualified("README intro", readmeIntro, CAPTURE_QUALIFIER, [
+  // The shared-components sentence names the `inbox engine` — hooks/lib/brains-inbox.sh, a file both
+  // packages carry — not a promise that anything is delivered.
+  "inbox engine",
+]);
+assert(
+  normalizeRegion(readmeIntro) === README_INTRO_REGION,
+  "README's intro must match the approved copy exactly (README and README_INTRO_REGION must be edited together)",
+);
+// The canary, over the whole file rather than only the regions no constant pins. See
+// UNCONDITIONAL_CAPTURE for what it is for and what it cannot do.
+for (const pattern of UNCONDITIONAL_CAPTURE) {
+  const match = pattern.exec(readme);
+  assert(
+    !match,
+    `README presents capture or the inbox as unconditional — both are hook-driven, credential-gated, and run in no web chat (matched: ${JSON.stringify(match?.[0])})`,
+  );
+}
+
 const codexReadme = readme.slice(codexStart, claudeStart);
 assert(
   codexReadme.includes("codex mcp login brains"),
@@ -690,7 +1619,7 @@ assert(
 // The token is still documented, but only under the optional capture/inbox heading — never in the
 // install sequence itself. Anything above that heading claiming a token is how you get in is the
 // regression this catches.
-const optionalHeadingIndex = codexReadme.indexOf("### Optional");
+const optionalHeadingIndex = headingIndex(codexReadme, "### Optional");
 assert(optionalHeadingIndex > 0, "README must keep the optional capture/inbox section for Codex");
 const codexPrerequisites = codexReadme.slice(0, optionalHeadingIndex);
 for (const forbidden of ["BRAINS_API_TOKEN", "launchctl setenv"]) {
@@ -699,20 +1628,75 @@ for (const forbidden of ["BRAINS_API_TOKEN", "launchctl setenv"]) {
     `README must not present \`${forbidden}\` as a Codex install prerequisite — it belongs under the optional capture/inbox section`,
   );
 }
+// The whole pre-Optional region, verbatim, for the same reason as the Claude one below: the two
+// literal bans above were the only thing standing here, and a false promise that named neither
+// literal walked straight past them.
 assert(
-  codexReadme.slice(optionalHeadingIndex).includes("launchctl setenv"),
+  normalizeRegion(codexPrerequisites) === CODEX_INSTALL_REGION,
+  "README's Codex install region must match the approved copy exactly (README and CODEX_INSTALL_REGION must be edited together)",
+);
+const codexOptional = codexReadme.slice(optionalHeadingIndex);
+assert(
+  codexOptional.includes("launchctl setenv"),
   "README's optional section must keep the desktop launchctl path — a desktop app inherits no shell export",
 );
-
-// Same treatment for the Claude Code section, sliced between its own heading and the shared
-// layout section. Resolve the end delimiter first for the same reason as above.
-const sharedLayoutStart = readme.indexOf("## Shared layout");
-assert(sharedLayoutStart >= 0, "README must keep the shared layout section — it ends the Claude slice");
 assert(
-  sharedLayoutStart > claudeStart,
-  "README's shared layout section must follow the Claude Code install — the checks below slice between them",
+  normalizeRegion(codexOptional) === CODEX_OPTIONAL_REGION,
+  "README's Codex token section must match the approved copy exactly (README and CODEX_OPTIONAL_REGION must be edited together)",
 );
-const claudeReadme = readme.slice(claudeStart, sharedLayoutStart);
+
+// Same treatment for the Claude Code section. It is sliced between its own heading and the
+// claude.ai web heading — NOT the shared layout section. The web section sits between the two,
+// and letting it fall inside this slice would subject it to the Claude-Code-specific rules below
+// (the version-floor bans, the `bash -n` sweep) while leaving its own claims unpinned. Resolve
+// both delimiters first, for the same reason as above.
+const sharedLayoutStart = headingIndex(readme, "## Shared layout");
+const webStart = headingIndex(readme, CLAUDE_WEB_HEADING);
+assert(sharedLayoutStart >= 0, "README must keep the shared layout section — it ends the web slice");
+assert(webStart >= 0, `README must document the claude.ai web install ("${CLAUDE_WEB_HEADING}")`);
+assert(
+  webStart > claudeStart,
+  "README's claude.ai web section must follow the Claude Code install — the checks below slice between them",
+);
+assert(
+  sharedLayoutStart > webStart,
+  "README's shared layout section must follow the claude.ai web install — the web checks slice between them",
+);
+const claudeReadme = readme.slice(claudeStart, webStart);
+
+// Every delimiter this file slices on, in one place, counted the way the manifest's mcpServers is
+// counted above. A boundary is taken from the FIRST match, so a second copy of a delimiter silently
+// redraws the regions around it, and both halves of that were executed: a second
+// "## Install for claude.ai web" later in the file carries its content OUTSIDE the pinned web
+// region, and a decoy "## Shared layout" planted where the approved region ends truncates that
+// region to nothing. Each entry is the exact string its boundary resolves on, and each is scoped to
+// the text it is resolved in — "### Optional" is legitimately once per client section, not once per
+// file.
+//
+// KEPT, though the composition assert at the end of this section is now the guarantee and subsumes
+// it: a duplicated heading fails here naming the heading, one line, instead of arriving as a
+// whole-file diff. Same reason the per-region pins sit ahead of composition. What it does NOT cover
+// is a mid-line delimiter — that is handled at the source now, by resolving every boundary at a line
+// start, so a glued copy is not a boundary at all and the text around it fails composition.
+for (const [scopeLabel, scope, delimiter] of [
+  ["README", readme, "## Install for Codex"],
+  ["README", readme, "## Install for Claude Code"],
+  ["README", readme, CLAUDE_WEB_HEADING],
+  ["README", readme, "## Shared layout"],
+  ["README", readme, "## Self-hosting"],
+  ["README", readme, "## License"],
+  ["README's Codex section", codexReadme, "### Optional"],
+  ["README's Claude Code section", claudeReadme, CLAUDE_OPTIONAL_HEADING],
+  ["README's Claude Code section", claudeReadme, "### Already installed?"],
+] as const) {
+  const pattern = new RegExp(`^${delimiter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gm");
+  const occurrences = (scope.match(pattern) ?? []).length;
+  assert(
+    occurrences === 1,
+    `${scopeLabel} must contain "${delimiter}" exactly once at the start of a line — every region here is sliced on its FIRST occurrence, so a second copy silently moves the boundary (found ${occurrences})`,
+  );
+}
+
 // Pinned individually so a single dropped element names itself, ahead of the whole-region pin.
 for (const pinned of [
   "claude plugin marketplace add https://github.com/ssvlabs/brains-plugins.git",
@@ -726,8 +1710,11 @@ for (const pinned of [
 ]) {
   assert(claudeReadme.includes(pinned), `README's Claude install must keep: ${pinned}`);
 }
-const claudeOptionalIndex = claudeReadme.indexOf(CLAUDE_OPTIONAL_HEADING);
+const claudeOptionalIndex = headingIndex(claudeReadme, CLAUDE_OPTIONAL_HEADING);
 assert(claudeOptionalIndex > 0, "README must keep the optional capture/inbox section for Claude Code");
+const claudeMigrationIndex = headingIndex(claudeReadme, "### Already installed?");
+assert(claudeMigrationIndex > claudeOptionalIndex, "README must tell an existing Claude Code install how to migrate, after the token section");
+const claudeMigration = claudeReadme.slice(claudeMigrationIndex);
 // The whole pre-Optional region is pinned verbatim. Enumerated bans on this region kept losing to
 // paraphrase — "prompts during installation for the brains token" walked past a token ban, and
 // "or a newer release" walked past a version-floor ban — so the approved copy is the contract.
@@ -736,10 +1723,10 @@ assert(
   normalizeRegion(claudeReadme.slice(0, claudeOptionalIndex)) === CLAUDE_INSTALL_REGION,
   "README's Claude install region must match the approved copy exactly (README and CLAUDE_INSTALL_REGION must be edited together)",
 );
-// Below the heading "token" is legitimate — it IS the token section — so pinning the copy would
-// freeze docs that should stay editable. Ban only version floors here. Best-effort against
-// paraphrase; the region pin above carries the strong guarantee.
-const claudeOptionalBody = claudeReadme.slice(claudeOptionalIndex);
+// The token section, kept as NAMED signals ahead of its own pin. These two bans used to be all that
+// stood here, on the argument that "token" is legitimate below the heading — see
+// CODEX_OPTIONAL_REGION for the two evasions that retired that argument.
+const claudeOptionalBody = claudeReadme.slice(claudeOptionalIndex, claudeMigrationIndex);
 assert(
   !CLAUDE_VERSION_SHAPE.test(claudeOptionalBody),
   "README's Claude token section must not name a version — no Claude Code floor is verifiable",
@@ -748,25 +1735,97 @@ assert(
   !CLAUDE_FLOOR_VOCAB.test(claudeOptionalBody),
   "README's Claude token section must not imply a minimum Claude Code version",
 );
+assert(
+  normalizeRegion(claudeOptionalBody) === CLAUDE_OPTIONAL_REGION,
+  "README's Claude token section must match the approved copy exactly (README and CLAUDE_OPTIONAL_REGION must be edited together)",
+);
 // Every published command gets copied verbatim by someone, so parse them instead of trusting a
 // read-through: `--config token=<your token>` looked fine in review and is a syntax error in both
 // bash and zsh, because the angle brackets are redirections. Checking the whole block also covers
 // the three-command install, where a broken line would strand a user mid-install.
-const claudeShellBlocks = [...claudeReadme.matchAll(/```sh\n([\s\S]*?)```/g)].map((match) => match[1]);
+// Sweep EVERY shell block in the file, not just this slice. Region-scoped sweeping silently lost
+// coverage the moment a block moved: promoting "Self-hosting" past "## Shared layout" took its
+// `--config endpoint=…` example outside every slice checked here, and the six Codex blocks were
+// never swept at all — so the one command a self-hoster copies, and the whole Codex install, were
+// unchecked. The syntax of a published command does not depend on which section it sits in.
+//
+// Every fence is one of three kinds and there is no fourth: SWEPT (parsed with `bash -n` below),
+// NOT_SHELL (a data or output block, excluded on purpose), or PROMPTED (rejected). An unclassified
+// language fails, because the coverage claim above is only true if adding a fence forces a decision
+// about it — a ```console block was neither swept nor refused, and a ```Bash block was certified as
+// swept by an allow-list that lower-cased the language and then skipped by an extractor that did not.
+const SWEPT_SHELL_FENCES = ["sh", "bash", "shell", "zsh"];
+// Deliberately NOT parsed. Empty today: every fence in this README is a shell block. A data or
+// output block lands here WITH its reason, so excluding one stays a visible act rather than a gap.
+const NOT_SHELL_FENCES: string[] = [];
+// Prompt transcripts, rejected rather than allow-listed: every command in this file exists to be
+// copied verbatim, `bash -n` cannot parse `$ claude plugin install …`, and stripping the prompts to
+// make it parse would sweep a body no reader copies — so this would become the one fence an author
+// could reach for to publish an unchecked command. There are none today, so the ban costs nothing.
+const PROMPTED_SHELL_FENCES = ["console", "shell-session", "shellsession", "sh-session", "terminal"];
+const { fences: readmeFences, outside: readmeOutsideFences } = markdownFences(readme);
+for (const { language } of readmeFences) {
+  assert(
+    language !== "",
+    "README has a fence with no language — label it `sh` so the sweep parses it, or add its language to NOT_SHELL_FENCES with a reason",
+  );
+  assert(
+    !PROMPTED_SHELL_FENCES.includes(language),
+    `README fence \`\`\`${language} is a prompt transcript this sweep cannot parse — publish the commands in a \`\`\`sh block so they get parsed`,
+  );
+  assert(
+    SWEPT_SHELL_FENCES.includes(language) || NOT_SHELL_FENCES.includes(language),
+    `README uses a fence this sweep does not classify: \`\`\`${language} — add it to SWEPT_SHELL_FENCES (parsed with bash -n) or to NOT_SHELL_FENCES (data or output, deliberately not parsed)`,
+  );
+}
+// A fence is not the only way to publish a copyable command, and the other ways are invisible to
+// the scanner: an indented code block (four spaces or a tab) needs no fence at all, and a fence
+// opened inside a blockquote or a list item starts with `> ` or `- `, which is not a fence opener by
+// the rule that scanner implements. The list form was executed: `- ```sh` followed by a two-space
+// indented broken command renders as a shell block (an unclosed fence closes at the end of the list
+// item) while every line of it read as ordinary prose here, two-space indents and all. None of these
+// exist in this file today; each would render as code and go unswept, so each is refused by name
+// rather than parsed — the same call as the prompt fences above, for the same reason.
+for (const line of readmeOutsideFences) {
+  assert(
+    !/^( {4,}|\t)/.test(line),
+    `README has an indented code block outside any fence — it renders as code and this sweep cannot parse it; publish it as a top-level \`\`\`sh block: ${line}`,
+  );
+  assert(
+    !/^\s*>/.test(line),
+    `README has a blockquoted line — a fence inside a blockquote is not swept; publish commands as a top-level \`\`\`sh block: ${line}`,
+  );
+  assert(
+    !/^ {0,3}([-*+]|\d{1,9}[.)])\s+(`{3,}|~{3,})/.test(line),
+    `README opens a code fence inside a list item — it renders as code and this sweep does not parse it; publish it as a top-level \`\`\`sh block: ${line}`,
+  );
+}
+const readmeShellBlocks = readmeFences
+  .filter((fence) => SWEPT_SHELL_FENCES.includes(fence.language))
+  .map((fence) => fence.body);
+const claudeShellBlocks = markdownFences(claudeReadme).fences
+  .filter((fence) => SWEPT_SHELL_FENCES.includes(fence.language))
+  .map((fence) => fence.body);
 assert(claudeShellBlocks.length > 0, "README's Claude install must keep its shell blocks");
+// Containment, not a count comparison: `readmeShellBlocks.length >= claudeShellBlocks.length` holds
+// for any two files — the whole-file sweep is a superset by construction — so it proved nothing.
+// Both sides come from the same scanner, so the bodies compare byte for byte.
 for (const block of claudeShellBlocks) {
+  assert(
+    readmeShellBlocks.includes(block),
+    `the whole-file shell sweep missed a block from the Claude install section — it is published unparsed:\n${block}`,
+  );
+}
+for (const block of readmeShellBlocks) {
   const parsed = spawnSync("bash", ["-n"], { input: block, encoding: "utf8" });
   assert(
     parsed.status === 0,
-    `README's Claude shell block is not valid shell:\n${block}\n${parsed.stderr}`,
+    `README shell block is not valid shell:\n${block}\n${parsed.stderr}`,
   );
 }
 
 // A plugin from the header era is registered but logged out, so the migration path has to say
-// both halves: update, then sign in.
-const claudeMigrationIndex = claudeReadme.indexOf("### Already installed?");
-assert(claudeMigrationIndex > 0, "README must tell an existing Claude Code install how to migrate");
-const claudeMigration = claudeReadme.slice(claudeMigrationIndex);
+// both halves: update, then sign in. Named signals, then the region.
 assert(
   claudeMigration.includes("claude plugin update brains"),
   "README's Claude migration must update the plugin",
@@ -774,6 +1833,127 @@ assert(
 assert(
   claudeMigration.includes(CLAUDE_MCP_LOGIN),
   "README's Claude migration must sign in — updating alone leaves the user logged out",
+);
+assert(
+  normalizeRegion(claudeMigration) === CLAUDE_MIGRATION_REGION,
+  "README's Claude migration section must match the approved copy exactly (README and CLAUDE_MIGRATION_REGION must be edited together)",
+);
+
+// The claude.ai web section, sliced between its own heading and the shared layout section.
+//
+// This section exists because the rest of this README describes hook-driven capture, and a web
+// reader gets none of it: hooks are inert in claude.ai chat on BOTH install paths — the custom
+// connector and the full marketplace-sync plugin (support article 13837440). What replaces them
+// was measured live rather than assumed (claude.ai, 2026-08-05): an explicit "save this chat to brains"
+// works, while unprompted capture fired on ONE of five passive trials — including a trial that
+// announced a save it never performed. The assertions below pin that distinction, because the
+// tempting edit is to collapse the two into one reassuring sentence, and the whole finding is
+// that they are not the same promise.
+const webReadme = readme.slice(webStart, sharedLayoutStart);
+assert(
+  webReadme.includes(CLAUDE_WEB_GUIDE),
+  `README's web section must link the install guide (${CLAUDE_WEB_GUIDE}) — it owns the procedure and the instruction block, which must not be forked into this file`,
+);
+assert(
+  webReadme.includes(CLAUDE_MCP_URL),
+  `README's web section must name ${CLAUDE_MCP_URL} — it is what the connector dialog asks for`,
+);
+// Both install paths. Naming only the connector would strand paid users on the route that
+// carries the skills; naming only the plugin would exclude every Free-tier reader.
+for (const path of ["Custom connector", "Full plugin"]) {
+  assert(
+    webReadme.includes(path),
+    `README's web section must name both claude.ai install paths — missing: ${path}`,
+  );
+}
+assert(
+  webReadme.includes("save_chat_session"),
+  "README's web section must name save_chat_session — it is the only capture path on claude.ai",
+);
+// The measured shape, in both directions. Dropping either half re-creates the bug this ticket
+// fixed: without the explicit path the section reads as "capture is broken", and without the
+// unreliability caveat it reads as "capture just works".
+assert(
+  /save this chat to brains/i.test(webReadme),
+  "README's web section must give the user the explicit phrasing that actually works",
+);
+assert(
+  /only sometimes/i.test(webReadme),
+  "README's web section must keep unprompted capture marked unreliable — it fired on one of five measured passive trials",
+);
+assert(
+  /list_pages type=chat_session|which chats it\s+has/i.test(webReadme),
+  "README's web section must tell the user how to VERIFY a save — a model has been observed claiming a save it did not perform",
+);
+// The regression that would pass every check above: re-asserting hook-driven capture on the one
+// surface whose whole purpose is to say the hooks are absent.
+assert(
+  !/\bcapture is automatic\b/i.test(webReadme),
+  "README's web section must not claim automatic capture — no hooks run on claude.ai, on either install path",
+);
+// And the strong guarantee the keyword checks above cannot give: the WHOLE section, verbatim.
+// Every assertion above passed a rewrite that reversed the meaning, twice over — once inside the
+// capture paragraphs and once in a new paragraph beside them (see the constant's own comment).
+// Changing this copy is a deliberate two-line diff: CLAUDE_WEB_REGION and the README together.
+assert(
+  webReadme.includes("**Capture is different"),
+  "README's web section must keep its capture paragraphs — they are what a web user needs most",
+);
+assert(
+  normalizeRegion(webReadme) === CLAUDE_WEB_REGION,
+  "README's claude.ai section must match the approved copy exactly (README and CLAUDE_WEB_REGION must be edited together)",
+);
+
+// The self-hosting section, sliced between its own heading and the licence. See SELF_HOSTING_REGION
+// for why this copy is pinned and the shared layout above it is not.
+const selfHostingStart = headingIndex(readme, "## Self-hosting");
+const licenseStart = headingIndex(readme, "## License");
+assert(
+  selfHostingStart > sharedLayoutStart,
+  "README's self-hosting section must follow the shared layout — the slice below depends on it",
+);
+assert(
+  licenseStart > selfHostingStart,
+  "README must keep the licence section after self-hosting — it ends the self-hosting slice",
+);
+assert(
+  normalizeRegion(readme.slice(sharedLayoutStart, selfHostingStart)) === SHARED_LAYOUT_REGION,
+  "README's shared layout section must match the approved copy exactly (README and SHARED_LAYOUT_REGION must be edited together)",
+);
+assert(
+  normalizeRegion(readme.slice(selfHostingStart, licenseStart)) === SELF_HOSTING_REGION,
+  "README's self-hosting section must match the approved copy exactly (README and SELF_HOSTING_REGION must be edited together)",
+);
+assert(
+  normalizeRegion(readme.slice(licenseStart)) === LICENSE_REGION,
+  "README's licence section must match the approved copy exactly (README and LICENSE_REGION must be edited together)",
+);
+
+// The WHOLE file, composed from the regions above, in order. Each pin holds its own text; until now
+// nothing held the SEAMS between them, and both kinds of seam were executed. Text GLUED to a
+// region's last line: "## Shared layout" appended with no space to the web section's final sentence
+// moved the boundary onto the decoy, left the pinned slice matching exactly, and put every paragraph
+// after it inside no region at all. Text in a region nobody had pinned: a capture promise with
+// neither stem, dropped into the Codex token section, passed every check including the canary.
+// Composition removes the class rather than the two instances — every published byte now belongs to
+// exactly one approved constant, so there is no seam left to write in. This is what CORE_BODY does
+// for core.md. The per-region pins stay AHEAD of it as named signals: this one can only report that
+// the file no longer composes, which is true but tells the reader nothing about where.
+const README_REGIONS = [
+  README_INTRO_REGION,
+  CODEX_INSTALL_REGION,
+  CODEX_OPTIONAL_REGION,
+  CLAUDE_INSTALL_REGION,
+  CLAUDE_OPTIONAL_REGION,
+  CLAUDE_MIGRATION_REGION,
+  CLAUDE_WEB_REGION,
+  SHARED_LAYOUT_REGION,
+  SELF_HOSTING_REGION,
+  LICENSE_REGION,
+];
+assert(
+  normalizeRegion(readme) === README_REGIONS.join("\n\n"),
+  "README must be exactly the approved regions, in order, with nothing between them — every byte this file publishes belongs to one constant here, so text added at a seam or in a section no pin covers fails right here",
 );
 
 assert(
@@ -816,6 +1996,32 @@ try {
   );
   chmodSync(join(bin, "codex"), 0o755);
   chmodSync(join(bin, "curl"), 0o755);
+
+  // core.md's copy is pinned above; this proves it is DELIVERED. Deleting brains-start.sh's
+  // `cat "$CORE_MD"` line passed all three suites — SessionStart is the core prompt's ONLY delivery
+  // path, and nothing in CI read what that hook actually emits, so every copy pin above proved the
+  // text was right while nothing proved a model ever sees it. Guard-works is not guard-runs (#14).
+  // No credential resolves here, so the inbox engine exits silently and stdout is the injected
+  // context alone; the empty project dir keeps a stray .claude/USER.md on the runner out of it.
+  const emptyProject = join(temp, "empty-project");
+  mkdirSync(emptyProject);
+  const coreDelivery = spawnSync("bash", [join(PLUGIN, "hooks", "brains-start.sh")], {
+    input: JSON.stringify({ session_id: "core-delivery-probe" }),
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      CLAUDE_PROJECT_DIR: emptyProject,
+      CLAUDE_PLUGIN_OPTION_TOKEN: "",
+      BRAINS_API_TOKEN: "",
+      BRAINS_INBOX_TOKEN: "",
+      BRAINS_STATE_DIR: join(temp, "state-core"),
+    },
+  });
+  assert(coreDelivery.status === 0, `SessionStart hook failed: ${coreDelivery.stderr.toString()}`);
+  assert(
+    normalizeRegion(coreDelivery.stdout.toString()).includes(CORE_BODY),
+    "SessionStart hook must inject core.md — it is the only delivery path for the core prompt, and the pins above prove the text is right, not that it reaches a model",
+  );
 
   const result = spawnSync("bash", [join(PLUGIN, "hooks", "brains-turn.sh")], {
     input: JSON.stringify({ session_id: "codex-session", prompt: "hello" }),

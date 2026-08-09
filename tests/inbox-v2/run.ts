@@ -808,10 +808,10 @@ const SCENARIOS: Scenario[] = [
       const manifest = JSON.parse(readFileSync(PLUGIN_JSON_PATH, "utf8")) as { version: string };
       assertEqual(report.plugin_version, manifest.version, "25 plugin_version matches manifest");
 
-      // Sections come from the shipped core.md; this release bumps it to v5.
+      // Sections come from the shipped core.md; this release bumps it to v6.
       const sections = (report.sections ?? []) as Array<{ name: string; version: number }>;
       const core = sections.find((s) => s.name === "core");
-      assertEqual(core?.version, 5, "25 core marker reported at v5");
+      assertEqual(core?.version, 6, "25 core marker reported at v6");
 
       // No drift → no update nudge in stdout.
       assertNotContains(r.stdout, "brains:update", "25 no update nudge when device is current");

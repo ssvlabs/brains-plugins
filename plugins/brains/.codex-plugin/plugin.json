@@ -1,6 +1,6 @@
 {
   "name": "brains",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "description": "Your personal memory layer for Codex: query Gmail, Calendar, Drive, and prior conversations, then build boards, automations, and workflows.",
   "author": {
     "name": "brains (ssvlabs)",
@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "Brains",
     "shortDescription": "Your personal memory layer",
-    "longDescription": "Query your Gmail, Calendar, Drive, and prior AI conversations from Codex, with automatic context and capture plus boards, automations, workflows, and feedback flows.",
+    "longDescription": "Query your Gmail, Calendar, Drive, and prior AI conversations from Codex, with automatic context and hook-driven capture plus boards, automations, workflows, and feedback flows.",
     "developerName": "ssvlabs",
     "category": "Productivity",
     "capabilities": ["Read", "Write", "Automate"],
