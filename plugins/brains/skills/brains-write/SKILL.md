@@ -17,8 +17,13 @@ It returns slug/title/snippet, so call `get_page` on the selected
 slug to read frontmatter. Use its `install_id`, `action_name`, and structured
 `input` in `act_on_integration`; this tuple is the only call
 shape. Partial tuples error; only bare legacy `source` returns `clarification`.
-`requires_confirmation:true` drafts for out-of-band approval;
-`requires_confirmation:false` runs inline. If
+`requires_confirmation:true` normally drafts for out-of-band approval;
+`requires_confirmation:false` runs inline. A user may additionally enable direct
+execution in their brains settings, in which case a short allowlist of low-risk
+actions also runs inline when called from an eligible client signed in from the
+user's own computer (CLI clients such as Claude Code and Codex) — every execution
+is still recorded in /inbox. The mode is decided server-side per call, so treat
+any call as potentially executing and never assume a `draft_id`. If
 `requires_confirmation` is absent, the page predates the field: treat whether
 it drafts or runs as unknown. `side_effect` says where it writes
 (`external` = the provider, visible outside brains;
