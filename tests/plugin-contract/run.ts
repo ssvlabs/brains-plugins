@@ -1615,11 +1615,28 @@ assert(
     writeSkillNormalized.includes("treat whether it drafts or runs as unknown"),
   "absent requires_confirmation must remain unknown rather than predict a draft",
 );
+// `normally` is load-bearing, not hedging: a user who enables direct execution
+// has an allowlisted action run inline from a local CLI despite
+// `requires_confirmation:true`. The absolute wording this used to pin became
+// false server-side, so the pin follows the truth rather than the other way
+// round. The other two clauses are unchanged.
 assert(
-  writeSkillNormalized.includes("`requires_confirmation:true` drafts for out-of-band approval") &&
+  writeSkillNormalized.includes("`requires_confirmation:true` normally drafts for out-of-band approval") &&
     writeSkillNormalized.includes("`requires_confirmation:false` runs inline") &&
     writeSkillNormalized.includes("| `auto_executed` | It already ran; it carries `result` and `action_record_id`."),
   "both requires_confirmation branches must retain their distinct behavior",
+);
+// The rule that carries the weight once `true` can execute: the caller must not
+// plan on a draft. Pinned as ONE CONTIGUOUS run of the rendered sentence, not as
+// separate `includes` calls for "decided server-side" and "never assume a
+// `draft_id`" — two fragments can each be present in different sentences, in
+// different sections, or under a contradicting condition, which pins the
+// vocabulary while letting the rule itself be reworded away.
+assert(
+  writeSkillNormalized.includes(
+    "The mode is decided server-side per call, so treat any call as potentially executing and never assume a `draft_id`.",
+  ),
+  "per-call server-side mode and the never-assume-a-draft_id rule must stay one intact sentence",
 );
 assert(
   writeSkillNormalized.includes("Partial tuples error") &&
