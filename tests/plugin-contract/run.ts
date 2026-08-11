@@ -1602,6 +1602,62 @@ for (const dir of skillDirs) {
   );
 }
 
+// The whole rendered action contract, pinned verbatim. The `includes` assertions
+// below stay — they name WHICH rule broke, which "the paragraph changed" cannot —
+// but presence is not enough on its own: `includes` proves a sentence is there and
+// says nothing about what sits NEXT to it. Demonstrated during review: leaving
+// every pinned sentence intact and INSERTING "the setting is off for almost
+// everyone, so plan on the draft" straight after the `draft_id` rule kept every
+// substring check green while reversing what the contract tells an agent to do.
+// Only whole-region equality refuses an addition.
+//
+// BOUNDARIES. Start: the `Discover with …` line that opens the contract. End: the
+// `| \`kind\` |` table header, EXCLUSIVE — so the region covers the entire prose
+// block and an insertion anywhere in it, including just past the `draft_id`
+// sentence where the review's attack landed, falls INSIDE the pin. Stopping at the
+// `draft_id` sentence would leave that exact evasion one character outside the
+// region and change nothing. Both anchors are structural rather than editorial:
+// the opener is the first line every rendered face of this contract starts with,
+// and the table header is a fixed column row, so neither moves under a reword of
+// the prose between them.
+//
+// COST, accepted deliberately: this reddens on EVERY upstream reword of the
+// paragraph, including harmless ones. That is the point — this text tells an agent
+// when a call may fire an external write without asking, so a human should have to
+// read each change to it before it ships to users.
+//
+// TO UPDATE (the only correct procedure): read the upstream diff and satisfy
+// yourself the new wording is true of what the server does, then replace this
+// constant with the new bytes. Do NOT relax it back to a substring or trim the
+// region to make a sync green — that reintroduces the additive hole above.
+const WRITE_ACTION_CONTRACT_REGION = [
+  "Discover with `query type=integration_action text=\"<intent>\"`.",
+  "It returns slug/title/snippet, so call `get_page` on the selected",
+  "slug to read frontmatter. Use its `install_id`, `action_name`, and structured",
+  "`input` in `act_on_integration`; this tuple is the only call",
+  "shape. Partial tuples error; only bare legacy `source` returns `clarification`.",
+  "`requires_confirmation:true` normally drafts for out-of-band approval;",
+  "`requires_confirmation:false` runs inline. A user may additionally enable direct",
+  "execution in their brains settings, in which case a short allowlist of low-risk",
+  "actions also runs inline when called from an eligible client signed in from the",
+  "user's own computer (CLI clients such as Claude Code and Codex) — every execution",
+  "is still recorded in /inbox. The mode is decided server-side per call, so treat",
+  "any call as potentially executing and never assume a `draft_id`. If",
+  "`requires_confirmation` is absent, the page predates the field: treat whether",
+  "it drafts or runs as unknown. `side_effect` says where it writes",
+  "(`external` = the provider, visible outside brains;",
+  "`null` or absent = undeclared, treat as external). Inline external writes",
+  "include `rsvp_event`,",
+  "`create_draft`, and `add_labels`; do not infer safety from read vs write.",
+  "Cap: 30 auto-executions/install/60s.",
+  "Automation `dry_run` suppresses external writes to no-call `[DRY RUN]` drafts.",
+].join("\n");
+// Asserted AFTER the per-rule checks below, deliberately: they run first and name
+// the specific rule that broke, and this one is the catch-all for everything they
+// cannot see — an addition, a reflow, a sentence nobody thought to pin. Ordered the
+// other way it fires first on every in-region edit and the precise messages never
+// surface, which is the whole reason for keeping them.
+
 // Keep independent semantic assertions: digest equality proves provenance, not
 // that the canonical source itself kept the load-bearing safety rules.
 assert(
@@ -1615,11 +1671,28 @@ assert(
     writeSkillNormalized.includes("treat whether it drafts or runs as unknown"),
   "absent requires_confirmation must remain unknown rather than predict a draft",
 );
+// `normally` is load-bearing, not hedging: a user who enables direct execution
+// has an allowlisted action run inline from a local CLI despite
+// `requires_confirmation:true`. The absolute wording this used to pin became
+// false server-side, so the pin follows the truth rather than the other way
+// round. The other two clauses are unchanged.
 assert(
-  writeSkillNormalized.includes("`requires_confirmation:true` drafts for out-of-band approval") &&
+  writeSkillNormalized.includes("`requires_confirmation:true` normally drafts for out-of-band approval") &&
     writeSkillNormalized.includes("`requires_confirmation:false` runs inline") &&
     writeSkillNormalized.includes("| `auto_executed` | It already ran; it carries `result` and `action_record_id`."),
   "both requires_confirmation branches must retain their distinct behavior",
+);
+// The rule that carries the weight once `true` can execute: the caller must not
+// plan on a draft. Pinned as ONE CONTIGUOUS run of the rendered sentence, not as
+// separate `includes` calls for "decided server-side" and "never assume a
+// `draft_id`" — two fragments can each be present in different sentences, in
+// different sections, or under a contradicting condition, which pins the
+// vocabulary while letting the rule itself be reworded away.
+assert(
+  writeSkillNormalized.includes(
+    "The mode is decided server-side per call, so treat any call as potentially executing and never assume a `draft_id`.",
+  ),
+  "per-call server-side mode and the never-assume-a-draft_id rule must stay one intact sentence",
 );
 assert(
   writeSkillNormalized.includes("Partial tuples error") &&
@@ -1662,6 +1735,20 @@ assert(!writeSkillNormalized.includes("never call `discard_action`"), "draft dis
 assert(writeSkillNormalized.includes("remains approvable"), "expired drafts must not be described as inert");
 assert(writeSkillNormalized.includes("this tuple is the only call shape"), "source-only action fallback must stay prohibited");
 assert(!/act_on_integration[^.]{0,200}request=/.test(writeSkillNormalized), "free-form action request must not return");
+
+// The catch-all for the contract paragraph — see WRITE_ACTION_CONTRACT_REGION above.
+const writeContractStart = writeSkill.indexOf("Discover with `query type=integration_action");
+const writeContractEnd = writeSkill.indexOf("| `kind` | What happened |");
+assert(writeContractStart > 0, "brains-write must keep its action-contract opener");
+assert(
+  writeContractEnd > writeContractStart,
+  "brains-write's action contract must precede the kind table — the slice below depends on it",
+);
+assert(
+  normalizeRegion(writeSkill.slice(writeContractStart, writeContractEnd)) ===
+    WRITE_ACTION_CONTRACT_REGION,
+  "brains-write's action contract must match the approved copy exactly — an inserted sentence can contradict a rule the per-rule checks above still find (regenerate upstream, re-read the change, then update WRITE_ACTION_CONTRACT_REGION)",
+);
 
 // Same treatment for brains-automation, and for the same reason: the digest proves
 // these bytes came from the catalog, not that the catalog kept the rails. Nothing

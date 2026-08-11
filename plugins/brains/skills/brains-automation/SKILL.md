@@ -149,8 +149,9 @@ It returns slug/title/snippet, so call `get_page` on the selected
 slug to read frontmatter. Use its `install_id`, `action_name`, and structured
 `input` in `brains.act`; this tuple is the only call
 shape. Partial tuples error; only bare legacy `source` returns `clarification`.
-`requires_confirmation:true` drafts for out-of-band approval;
-`requires_confirmation:false` runs inline. If
+`requires_confirmation:true` drafts for out-of-band approval unless this
+automation's owner set `write_policy:'auto_confirm_safe'`, which executes it
+inline; `requires_confirmation:false` runs inline either way. If
 `requires_confirmation` is absent, the page predates the field: treat whether
 it drafts or runs as unknown. `side_effect` says where it writes
 (`external` = the provider, visible outside brains;
