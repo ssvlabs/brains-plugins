@@ -23,14 +23,16 @@ execution in their brains settings, in which case a short allowlist of low-risk
 actions also runs inline when called from an eligible client signed in from the
 user's own computer (CLI clients such as Claude Code and Codex) — every execution
 is still recorded in /inbox. The mode is decided server-side per call, so treat
-any call as potentially executing and never assume a `draft_id`. If
+any call as potentially executing and never assume a `draft_id`. Get the user's
+go-ahead for the write before you call; do not call to find out whether it
+drafts. If
 `requires_confirmation` is absent, the page predates the field: treat whether
 it drafts or runs as unknown. `side_effect` says where it writes
 (`external` = the provider, visible outside brains;
 `null` or absent = undeclared, treat as external). Inline external writes
 include `rsvp_event`,
 `create_draft`, and `add_labels`; do not infer safety from read vs write.
-Cap: 30 auto-executions/install/60s.
+Cap: 30 auto-executions/install/60s. Direct execution is additionally capped at 10/user/60s across every install; past either cap a direct execution degrades to a draft.
 Automation `dry_run` suppresses external writes to no-call `[DRY RUN]` drafts.
 
 | `kind` | What happened | What you do |

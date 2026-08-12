@@ -176,7 +176,7 @@ After one hour a draft moves to the `/inbox` Expired tab but remains
 approvable. There is no edit-at-confirm step: call
 `discard_action` before re-drafting corrected input.
 
-Automation tokens cannot self-confirm. A confirmation-required action therefore waits for the human at `/inbox`, but a `requires_confirmation:false` action still executes inline for any caller granted `act_on_integration`. Get explicit agreement before saving an automation that performs an unattended external write. New automations default to `write_policy:'always_draft'`; only `update_automation` can switch to `auto_confirm_safe`, and that policy does not override an action whose recipe already auto-executes.
+Automation tokens cannot self-confirm: `confirm_action` is refused for them under either policy, so a confirmation-required action is released by the `write_policy` rule above, not by the sandbox. Get explicit agreement before saving an automation that performs an unattended external write. New automations default to `write_policy:'always_draft'`; switching to `auto_confirm_safe` is an explicit configuration change, and that policy does not override an action whose recipe already auto-executes.
 
 **For "notify me" / "ping me" / "DM me" asks**, default to `telegram_push` when the user has Telegram connected — it's the user's primary notification surface. Reach for `act_on_integration` only when the notification belongs in a specific channel (email thread, calendar invite, Drive doc). `telegram_push` bypasses the draft/confirm step and sends immediately, so the user must have opted in by connecting the bot.
 
@@ -248,7 +248,7 @@ Derive from Steps 3 + 4. The user doesn't pick this — you do. Mention it inlin
 | Un-retire a row (`brains.boards.restore`) | `restore_board_row` |
 | Pull fresh gmail/calendar/drive data | `fetch_from_integration` |
 | Read a github/monday adapter (`brains.call("adapter_query", …)`) | `adapter_query` |
-| Send | `act_on_integration` (drafts for a confirm-required action; an action declaring `requires_confirmation:false` sends inline) |
+| Send | `act_on_integration` (drafts or sends inline per requires_confirmation and write_policy; see the contract above) |
 | Send a Telegram DM (only when user explicitly asked) | `telegram_push` (bypasses draft/confirm — delivers immediately) |
 | Write a memory page | `create_page` |
 | LLM call from sandbox | `automation_complete` |
@@ -377,8 +377,8 @@ The new agent lands in `active` state — it will start firing on its cron / pag
 Before handing off, prove the source compiles and runs end-to-end against a real trigger payload by firing one manual dry run. Call **`run_automation_once`** with:
 
 - `automation_id` — from Step 8
-- `dry_run: true` — default; lets the user code execute but suppresses outbound writes (same hook the admin Dry-Run button uses)
-- `verify_mode: true` — **REQUIRED for self-verification during this flow.** When true the MCP server suppresses all outbound side-effect tools (telegram_push, email / calendar / drive sends via act_on_integration, fetch_from_integration writes, and non-GET http_fetch) and returns suppressed-shape stubs instead. This lets you confirm the source compiles and the logic path executes end-to-end **without spamming the user's phone / inbox / drive** while you're still iterating. The user code still runs; only the deliveries are muted.
+- `dry_run: true` — default; suppresses act sends and `telegram_push`. Board and page writes run live under `dry_run` AND `verify_mode` — a smoke test mutates real rows
+- `verify_mode: true` — **REQUIRED for self-verification during this flow.** When true the MCP server suppresses all outbound side-effect tools (telegram_push, email / calendar / drive sends via act_on_integration, fetch_from_integration writes, and non-GET http_fetch) and returns suppressed-shape stubs instead. This lets you confirm the source compiles and the logic path executes end-to-end **without spamming the user's phone / inbox / drive** while you're still iterating.
 
 The tool enqueues a `trigger_kind='manual'` run and polls `automation_runs` until it terminates (or `wait_seconds` elapses). Default wait is `max_wall_seconds + 90` to cover the runner's ~30s tick + sandbox spawn.
 
