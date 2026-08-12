@@ -1642,14 +1642,16 @@ const WRITE_ACTION_CONTRACT_REGION = [
   "actions also runs inline when called from an eligible client signed in from the",
   "user's own computer (CLI clients such as Claude Code and Codex) — every execution",
   "is still recorded in /inbox. The mode is decided server-side per call, so treat",
-  "any call as potentially executing and never assume a `draft_id`. If",
+  "any call as potentially executing and never assume a `draft_id`. Get the user's",
+  "go-ahead for the write before you call; do not call to find out whether it",
+  "drafts. If",
   "`requires_confirmation` is absent, the page predates the field: treat whether",
   "it drafts or runs as unknown. `side_effect` says where it writes",
   "(`external` = the provider, visible outside brains;",
   "`null` or absent = undeclared, treat as external). Inline external writes",
   "include `rsvp_event`,",
   "`create_draft`, and `add_labels`; do not infer safety from read vs write.",
-  "Cap: 30 auto-executions/install/60s.",
+  "Cap: 30 auto-executions/install/60s. Direct execution is additionally capped at 10/user/60s across every install; past either cap a direct execution degrades to a draft.",
   "Automation `dry_run` suppresses external writes to no-call `[DRY RUN]` drafts.",
 ].join("\n");
 // Asserted AFTER the per-rule checks below, deliberately: they run first and name
@@ -1780,6 +1782,119 @@ assert(
 assert(
   automationSkillNormalized.includes("do NOT refuse and do NOT echo it back"),
   "brains-automation lost the handling for a secret the user pasted anyway",
+);
+
+// ---------------------------------------------------------------------------
+// The automation draft-vs-execute rules, pinned the same way brains-write's
+// contract is (see WRITE_ACTION_CONTRACT_REGION above) and for a reason this
+// artifact demonstrated: the three checks above are the ONLY content assertions
+// brains-automation had. Everything else about this file was digest equality
+// (`run.ts` line ~1447), which proves the bytes came from the catalog and says
+// nothing about what they say. A regeneration could silently re-drop any rule
+// below and CI here would stay green — which is exactly how the upstream defect
+// these rules fix reached production in the first place.
+//
+// WHY WHOLE REGIONS, not substrings. Two failure modes, both already observed in
+// this repo. A keyword pin dies to paraphrase: "cannot self-confirm" survives
+// "the sandbox may confirm when trusted". A verbatim sentence pin dies at the
+// SEAM: leave the pinned sentence intact and write the contradiction NEXT to it
+// ("verify_mode also holds back board writes") and every substring check stays
+// green while the reader is told the opposite. Only whole-region equality plus a
+// composition check refuses both.
+//
+// COUPLING, same as the block above: these bytes are generated from a different,
+// PRIVATE repo, so an author rewording the automation procedure reds a build in a
+// public repo they may not know exists. When that happens the fix is to re-derive
+// the rule upstream and regenerate — never to trim a region or soften an assert
+// so a sync goes green. That is the hole all of this exists to close.
+//
+// TO UPDATE: read the upstream diff, satisfy yourself the new wording is true of
+// what the server does, then replace the constant with the new bytes.
+
+// Rule 1 — automation tokens cannot self-confirm, and what releases a
+// confirmation-required action instead. Region runs from the `You can't confirm`
+// opener to the `**For "notify me"` lead-in, EXCLUSIVE: both anchors are
+// structural rather than editorial, and the span covers the confirm-boundary
+// prose AND the write_policy paragraph, so a contradiction inserted between them
+// — the natural place to put one — lands inside the pin.
+const AUTOMATION_WRITE_POLICY_REGION = [
+  "You can't confirm a draft from this loop. Only the user's out-of-band",
+  "`/inbox` or Telegram surface has the confirmation secret. So never call `confirm_action` yourself.",
+  "After one hour a draft moves to the `/inbox` Expired tab but remains",
+  "approvable. There is no edit-at-confirm step: call",
+  "`discard_action` before re-drafting corrected input.",
+  "",
+  "Automation tokens cannot self-confirm: `confirm_action` is refused for them under either policy, so a confirmation-required action is released by the `write_policy` rule above, not by the sandbox. Get explicit agreement before saving an automation that performs an unattended external write. New automations default to `write_policy:'always_draft'`; switching to `auto_confirm_safe` is an explicit configuration change, and that policy does not override an action whose recipe already auto-executes.",
+].join("\n");
+const automationPolicyStart = automationSkill.indexOf("You can't confirm a draft from this loop.");
+const automationPolicyEnd = automationSkill.indexOf('**For "notify me"');
+assert(automationPolicyStart > 0, "brains-automation must keep its confirmation-boundary opener");
+assert(
+  automationPolicyEnd > automationPolicyStart,
+  "brains-automation's write-policy paragraph must precede the notify-me guidance — the slice below depends on it",
+);
+assert(
+  normalizeRegion(automationSkill.slice(automationPolicyStart, automationPolicyEnd)) ===
+    AUTOMATION_WRITE_POLICY_REGION,
+  "brains-automation's write-policy contract must match the approved copy exactly — a sentence added beside these rules can reverse them while every keyword check passes (regenerate upstream, re-read the change, then update AUTOMATION_WRITE_POLICY_REGION)",
+);
+
+// Rule 2 — the dry_run/verify_mode suppression boundary. This is the one whose
+// previous wording was FALSE: it implied a smoke test muted every side effect,
+// when suppression fires at four call sites only and board and page writes run
+// live. Region is the whole `run_automation_once` argument list, so the
+// verify_mode bullet — the adjacent bullet, and the obvious seam for a
+// contradicting claim — is inside the pin rather than beside it.
+const AUTOMATION_SMOKE_TEST_REGION = [
+  "Call **`run_automation_once`** with:",
+  "",
+  "- `automation_id` — from Step 8",
+  "- `dry_run: true` — default; suppresses act sends and `telegram_push`. Board and page writes run live under `dry_run` AND `verify_mode` — a smoke test mutates real rows",
+  "- `verify_mode: true` — **REQUIRED for self-verification during this flow.** When true the MCP server suppresses all outbound side-effect tools (telegram_push, email / calendar / drive sends via act_on_integration, fetch_from_integration writes, and non-GET http_fetch) and returns suppressed-shape stubs instead. This lets you confirm the source compiles and the logic path executes end-to-end **without spamming the user's phone / inbox / drive** while you're still iterating.",
+].join("\n");
+const automationSmokeStart = automationSkill.indexOf("Call **`run_automation_once`** with:");
+const automationSmokeEnd = automationSkill.indexOf("The tool enqueues");
+assert(automationSmokeStart > 0, "brains-automation must keep its smoke-test invocation");
+assert(
+  automationSmokeEnd > automationSmokeStart,
+  "brains-automation's smoke-test arguments must precede the polling paragraph — the slice below depends on it",
+);
+assert(
+  normalizeRegion(automationSkill.slice(automationSmokeStart, automationSmokeEnd)) ===
+    AUTOMATION_SMOKE_TEST_REGION,
+  "brains-automation's smoke-test contract must match the approved copy exactly — this is the region that tells an author a mandated dry run still mutates real board and page rows (regenerate upstream, re-read the change, then update AUTOMATION_SMOKE_TEST_REGION)",
+);
+
+// Rule 3 — the grant table's Send row, which states when `act_on_integration`
+// drafts versus sends inline. Pinned as a whole row plus a UNIQUENESS check over
+// the table, not as a region: the other twenty rows are a grant inventory that
+// moves for unrelated reasons, and pinning them would red this build on every
+// upstream grant edit while adding no coverage of this rule. The uniqueness check
+// is what closes the seam a lone row pin would leave — an added row naming
+// `act_on_integration` with a different disposition fails it even though the
+// pinned row is untouched. Table sliced between its own header and the
+// grant-by-bare-name paragraph; the two other rows in this file that name the
+// tool live in a different table and are out of scope by construction.
+const AUTOMATION_SEND_GRANT_ROW =
+  "| Send | `act_on_integration` (drafts or sends inline per requires_confirmation and write_policy; see the contract above) |";
+const grantTableStart = automationSkill.indexOf("| Operation | Grant |");
+const grantTableEnd = automationSkill.indexOf("**Grant by bare MCP tool name.**");
+assert(grantTableStart > 0, "brains-automation must keep its grant-selection table");
+assert(
+  grantTableEnd > grantTableStart,
+  "brains-automation's grant table must precede the bare-tool-name rule — the slice below depends on it",
+);
+const grantTableRows = normalizeRegion(automationSkill.slice(grantTableStart, grantTableEnd))
+  .split("\n")
+  .filter((line) => line.startsWith("|"));
+const actGrantRows = grantTableRows.filter((line) => line.includes("act_on_integration"));
+assert(
+  actGrantRows.length === 1,
+  `brains-automation's grant table must state act_on_integration's draft-vs-send disposition exactly once — ${actGrantRows.length} rows name it, so a reader can be routed by whichever they read first (regenerate upstream, re-read the change, then update AUTOMATION_SEND_GRANT_ROW)`,
+);
+assert(
+  actGrantRows[0] === AUTOMATION_SEND_GRANT_ROW,
+  "brains-automation's Send grant row must match the approved copy exactly — it is where an author learns that this tool may send without drafting (regenerate upstream, re-read the change, then update AUTOMATION_SEND_GRANT_ROW)",
 );
 
 // This README is the install instructions for anyone who finds the repo directly rather than the

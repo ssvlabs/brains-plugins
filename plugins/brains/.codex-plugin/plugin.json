@@ -1,6 +1,6 @@
 {
   "name": "brains",
-  "version": "2.9.0",
+  "version": "2.9.1",
   "description": "Your personal memory layer for Codex: query Gmail, Calendar, Drive, and prior conversations, then build boards, automations, and workflows.",
   "author": {
     "name": "brains (ssvlabs)",

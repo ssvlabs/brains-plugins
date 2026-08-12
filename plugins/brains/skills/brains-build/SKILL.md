@@ -23,12 +23,13 @@ Don't restate that artifact here — open it.
 | **Recurring brief / digest** | Install a prebuilt automation that sends a recurring summary instead of scaffolding one. | `list_recipes` → `install_recipe` |
 | **Workflow** | A goal container: charter, KPIs, deadlines, roster, an owned board and template automations. | `create_workflow_flow` if your client exposes it (follow the playbook it returns), otherwise `create_workflow` |
 | **Mini-site** | Static sandboxed HTML on a brain — a deck, a one-pager, a shareable link. | `create_mini_site` |
-| **Sharing** | Give someone access — share_board, share_folder (cascades), share_mini_site, create_share_circle. | `share_board` |
+| **Sharing** | Give someone access — share_board, share_folder (cascades), share_mini_site. | `share_board` |
 | **Board source link** | Bind a board to an external resource through an adapter (http_json, ics, github, monday). | `create_board_link` |
 | **Dataset recipe** | Schedule a board link to materialize into a dataset on a cron — set up on the board's sources page. | the board's Sources page (`/boards/<id>/sources`) — no agent tool for this |
-| **Integrations** | See what's connected and install, upgrade or remove an integration. | the `brains-integrations` skill if your client loads skills, otherwise `list_my_integrations` → `install_integration` |
+| **Integrations** | Connectors: what's connected; install, upgrade, remove. CLI/connector `create_integration_flow` authors one. | the `brains-integrations` skill if your client loads skills, otherwise `list_my_integrations` → `install_integration` |
 | **Recipe publishing** | Publish a board or other supported build to the catalog — publish_recipe names the kinds it accepts. | `publish_recipe` |
-| **Telegram bot** | Reach the brain from a phone, without the laptop. | the Connect Telegram page (`/install/telegram`) — no agent tool for this |
+| **Recipe install** | Catalog recipe: install_recipe, uninstall_recipe removes/deletes; list_installed_versions reads 3 of 5. | `list_recipes` |
+| **Telegram bot** | Reach the brain from Telegram on a phone, without the laptop. | the Connect Telegram page (`/install/telegram`) — no agent tool for this |
 
 Reach for a `*_flow` tool for any create/set-up/scaffold ask: it returns the
 playbook that produces a structure which actually fits. Use the bare

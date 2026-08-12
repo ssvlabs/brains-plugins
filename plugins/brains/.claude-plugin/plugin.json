@@ -1,7 +1,7 @@
 {
   "name": "brains",
   "description": "Your memory layer: Gmail, Calendar, Drive, and prior Claude conversations as queryable pages, with reflexive recall, hook-driven turn-by-turn capture and inbox delivery, and boards/automations/workflows on top.",
-  "version": "2.9.0",
+  "version": "2.9.1",
   "author": {
     "name": "brains (ssvlabs)"
   },
