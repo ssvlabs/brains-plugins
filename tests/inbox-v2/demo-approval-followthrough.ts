@@ -52,6 +52,8 @@ function runClaude(prompt: string): Promise<string> {
     const proc = spawn("claude", ["--settings", SETTINGS, "-p", prompt], {
       env: {
         ...process.env,
+        // Hermetic: never let a real developer credential resolve in a test.
+        BRAINS_CREDENTIAL_STORE_DISABLED: "1",
         BRAINS_STATE_DIR: HOOK_DIR,
         BRAINS_MARKETPLACES_JSON: join(TEST_DIR, "no-such-marketplaces.json"),
         BRAINS_INBOX_URL: `http://127.0.0.1:${PORT}/inbox/claude`,

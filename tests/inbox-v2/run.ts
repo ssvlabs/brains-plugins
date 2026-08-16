@@ -168,6 +168,8 @@ async function runPluginHook(opts: {
     delete inherited.PLUGIN_DATA;
     const env = {
       ...inherited,
+      // Hermetic: never let a real developer credential resolve in a test.
+      BRAINS_CREDENTIAL_STORE_DISABLED: "1",
       BRAINS_STATE_DIR: opts.stateDir,
       // Pin the marketplaces file so auto-update detection is hermetic and
       // never reads the developer's real ~/.claude. Default to an absent path
@@ -811,7 +813,7 @@ const SCENARIOS: Scenario[] = [
       // Sections come from the shipped core.md; this release bumps it to v6.
       const sections = (report.sections ?? []) as Array<{ name: string; version: number }>;
       const core = sections.find((s) => s.name === "core");
-      assertEqual(core?.version, 6, "25 core marker reported at v6");
+      assertEqual(core?.version, 7, "25 core marker reported at v7");
 
       // No drift → no update nudge in stdout.
       assertNotContains(r.stdout, "brains:update", "25 no update nudge when device is current");

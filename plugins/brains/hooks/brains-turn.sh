@@ -15,10 +15,11 @@
 #                                                 mode (notifications only, no
 #                                                 stdout). Fires AFTER the turn.
 #
-# Ingest is the capture path WHERE IT RUNS, and it is credential-gated: with a
-# TOKEN (see the gate below) every turn POSTs to /ingest/claude and the server
-# builds the chat_session page. Without one this hook exits silently, and where
-# the hooks do not run at all (claude.ai web) save_chat_session is the only path.
+# Ingest is the capture path WHERE IT RUNS. It needs a credential, which now
+# comes from lib/brains-credential.sh: an explicitly configured token if there
+# is one, otherwise the client's own MCP OAuth store. Where the hooks do not run
+# at all (claude.ai web) save_chat_session is the only path.
+#
 # Claude keeps the existing fire-and-forget delivery. Codex waits for its
 # assistant POST during Stop so the hook process cannot finish before the
 # response has been handed to the ingest endpoint.
@@ -29,26 +30,12 @@ set -u
 CLIENT="claude"
 [ -n "${PLUGIN_ROOT:-}" ] && CLIENT="codex"
 
-TOKEN="${CLAUDE_PLUGIN_OPTION_TOKEN:-${BRAINS_API_TOKEN:-${BRAINS_INBOX_TOKEN:-}}}"
-# Desktop-launched Codex receives BRAINS_API_TOKEN directly. A standalone
-# Codex CLI can instead have an authenticated MCP transport with a persisted
-# Authorization header, so reuse that same credential for automatic capture.
-# `codex mcp get` is a local config read; its output is never logged.
-if [ -z "$TOKEN" ] && [ "$CLIENT" = "codex" ] && command -v codex >/dev/null 2>&1; then
-  AUTH_HEADER=$(codex mcp get brains --json 2>/dev/null \
-    | jq -r '.transport.http_headers.Authorization // .transport.http_headers.authorization // empty' 2>/dev/null)
-  case "$AUTH_HEADER" in
-    "Bearer "*) TOKEN="${AUTH_HEADER#Bearer }" ;;
-  esac
-  unset AUTH_HEADER
-fi
-[ -z "$TOKEN" ] && exit 0
 BASE="${CLAUDE_PLUGIN_OPTION_ENDPOINT:-${BRAINS_ENDPOINT:-https://mcp.mybrains.ai}}"
 BASE="${BASE%/}"
-INGEST="${BRAINS_INGEST_URL:-$BASE/ingest/claude}"
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$HOOK_DIR/lib/brains-inbox.sh"
+CRED_LIB="$HOOK_DIR/lib/brains-credential.sh"
 
 INPUT=$(cat)
 SESSION=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
@@ -58,36 +45,110 @@ PROMPT=$(printf '%s' "$INPUT" | jq -r '.prompt // empty' 2>/dev/null)
 TRANSCRIPT=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
 LAST_ASSISTANT=$(printf '%s' "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null)
 
+STATE_DIR="${BRAINS_STATE_DIR:-${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/brains}}}"
+
+# ---- current time, ahead of the capture gate --------------------------------
+# Inject the current LOCAL time, but at MOST once per clock-hour per session
+# (first turn of a session + whenever the hour rolls over) — not every turn, so
+# the model has an accurate "now" without per-turn noise.
+#
+# This runs BEFORE any credential work on purpose. It has nothing to do with
+# capture, and while it sat behind the credential gate a user without a token
+# silently lost accurate time injection as collateral.
+if [ -n "$PROMPT" ]; then
+  _now_key=$(date '+%Y%m%d%H')
+  _now_file="$STATE_DIR/now-$SESSION"
+  if [ "$_now_key" != "$(cat "$_now_file" 2>/dev/null)" ]; then
+    mkdir -p "$(dirname "$_now_file")" 2>/dev/null && printf '%s' "$_now_key" > "$_now_file" 2>/dev/null
+    printf '<!-- brains:now -->now: %s<!-- /brains:now -->\n' "$(date '+%a %Y-%m-%d %H:%M %Z (%z)')"
+  fi
+fi
+
+# ---- capture credential -----------------------------------------------------
+[ -r "$CRED_LIB" ] || exit 0
+# shellcheck source=lib/brains-credential.sh
+. "$CRED_LIB" || exit 0
+
+BRAINS_CRED_CLIENT="$CLIENT"
+# The endpoint set comes from the resolver so both hooks agree on which URLs
+# exist; health is keyed by the origin each one resolves to.
+brains_resolve_endpoints "$BASE"
+
+LOG="$STATE_DIR/brains.log"
+_mode="turn"
+[ -n "$PROMPT" ] || _mode="stop"
+log() { mkdir -p "$STATE_DIR" 2>/dev/null; printf '[%s] [%s] %s\n' "$(date -u +%FT%TZ)" "$_mode" "$*" >> "$LOG" 2>/dev/null; }
+
+if ! brains_resolve_credential "$BASE"; then
+  # No credential, or more than one that could be the right one. Record it so
+  # the session-start hook can say so once, then behave exactly as before:
+  # no request, no error, no noise on this turn.
+  brains_health_note ingest "$BRAINS_URL_INGEST" "$BRAINS_CRED_STATE"
+  exit 0
+fi
+
+# One line per outcome, and a healthy one only the first time in a session, so
+# the log answers "is capture working" without growing by two lines a turn.
+# Before this the log had never carried a single line about capture, which is
+# why a credential that stopped working went unnoticed for eleven days.
+capture_log() {  # role, outcome
+  local role outcome marker
+  role="$1"; outcome="$2"
+  if [ "$outcome" = "ok" ]; then
+    marker="$STATE_DIR/capok-$SESSION"
+    [ -f "$marker" ] && return 0
+    printf '%s' '1' > "$marker" 2>/dev/null
+  fi
+  log "capture $role: $outcome status=${BRAINS_HTTP_CODE:-none} source=$BRAINS_CRED_SOURCE"
+}
+
+ingest_once() {  # role, content
+  local role payload outcome
+  role="$1"; payload="$2"
+  # An explicit ceiling on top of the resolver's default, because this is the
+  # one call Codex makes SYNCHRONOUSLY: the Stop hook waits for the assistant
+  # POST, so a server that accepts the connection and then never answers would
+  # hold up the turn. On Claude the request is backgrounded and an unbounded one
+  # would linger instead of exiting.
+  if brains_request ingest "$BRAINS_URL_INGEST" --max-time 5 \
+       -X POST -H "Content-Type: application/json" -d "$payload"; then
+    outcome="ok"
+  elif [ "$BRAINS_HTTP_BLOCKED" = "1" ]; then
+    outcome="blocked"
+  else
+    case "${BRAINS_HTTP_CODE:-}" in
+      401|403) outcome="rejected" ;;
+      ''|000)  outcome="unreachable" ;;
+      *)       outcome="error" ;;
+    esac
+  fi
+  capture_log "$role" "$outcome"
+}
+
 ingest() {  # role, content
-  local role="$1" content="$2"
+  local role content payload
+  role="$1"; content="$2"
   [ -z "$content" ] && return 0
-  local payload
   payload=$(jq -nc --arg s "$SESSION" --arg r "$role" --arg c "$content" --arg client "$CLIENT" \
     '{session_id:$s, role:$r, content:$c, client:$client, client_type:"cli"}')
   if [ "$CLIENT" = "codex" ] && [ "$role" = "assistant" ]; then
-    curl -s --max-time 5 -X POST "$INGEST" \
-        -H "Authorization: Bearer $TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "$payload" >/dev/null 2>&1 || true
+    # Synchronous: Codex Stop must not finish before the response is delivered.
+    ingest_once "$role" "$payload"
   else
-    ( curl -s --max-time 5 -X POST "$INGEST" \
-        -H "Authorization: Bearer $TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "$payload" >/dev/null 2>&1 || true ) &
+    # Fire-and-forget, so this request outlives the hook. It takes its own lease
+    # on the credential first — the hook's exit would otherwise remove the
+    # config while curl was still starting up, and the POST would go out
+    # unauthenticated.
+    _lease=$(brains_cred_lease) || return 0
+    ( BRAINS_CRED_CONFIG="$_lease"
+      trap 'brains_cred_return "$_lease"' EXIT INT TERM HUP
+      ingest_once "$role" "$payload"
+      brains_cred_return "$_lease" ) &
   fi
 }
 
 if [ -n "$PROMPT" ]; then
   # ---- UserPromptSubmit: ingest user message, light inbox + user hooks -----
-  # Inject the current LOCAL time, but at MOST once per clock-hour per session
-  # (first turn of a session + whenever the hour rolls over) — not every turn, so
-  # the model has an accurate "now" without per-turn noise.
-  _now_key=$(date '+%Y%m%d%H')
-  _now_file="${BRAINS_STATE_DIR:-$HOME/.brains}/now-$SESSION"
-  if [ "$_now_key" != "$(cat "$_now_file" 2>/dev/null)" ]; then
-    mkdir -p "$(dirname "$_now_file")" 2>/dev/null && printf '%s' "$_now_key" > "$_now_file" 2>/dev/null
-    printf '<!-- brains:now -->now: %s<!-- /brains:now -->\n' "$(date '+%a %Y-%m-%d %H:%M %Z (%z)')"
-  fi
   ingest user "$PROMPT"
 
   [ -x "$LIB" ] && "$LIB" prompt "$SESSION"

@@ -6,7 +6,9 @@
 #   mode: startup | prompt | stop
 #
 # This is the v0.2 inbox dispatcher, adapted for the plugin runtime:
-#   - token/endpoint come from Claude userConfig or Codex BRAINS_API_TOKEN
+#   - the credential comes from lib/brains-credential.sh: an explicitly
+#     configured token if there is one, otherwise the client's own MCP OAuth
+#     store. The endpoint comes from Claude userConfig or BRAINS_ENDPOINT.
 #   - state (log / device-id / state.json) lives in plugin persistent data
 #   - the device "sections" report scans the plugin's core.md (not a CLAUDE.md)
 # The HTTP protocol (devices / inbox / ack) is IDENTICAL to the standalone hook.
@@ -32,14 +34,8 @@ SESSION="${2:-}"
 [ -z "$SESSION" ] && exit 0
 
 # --- config: plugin userConfig first, env overrides for tests --------------
-TOKEN="${CLAUDE_PLUGIN_OPTION_TOKEN:-${BRAINS_API_TOKEN:-${BRAINS_INBOX_TOKEN:-}}}"
-[ -z "$TOKEN" ] && exit 0
-
 BASE="${CLAUDE_PLUGIN_OPTION_ENDPOINT:-${BRAINS_ENDPOINT:-https://mcp.mybrains.ai}}"
 BASE="${BASE%/}"  # strip any trailing slash
-ENDPOINT="${BRAINS_INBOX_URL:-$BASE/inbox/claude}"
-ACK_ENDPOINT="${BRAINS_INBOX_ACK_URL:-${ENDPOINT}/ack}"
-DEVICES_ENDPOINT="${BRAINS_INBOX_DEVICES_URL:-${ENDPOINT}/devices}"
 
 # --- paths: plugin code dir (ephemeral) vs data dir (persistent) -----------
 CODEX_PLUGIN_RUNTIME=0
@@ -64,6 +60,38 @@ case "$MODE" in
 esac
 
 log() { printf '[%s] [%s] %s\n' "$(date -u +%FT%TZ)" "$MODE" "$*" >> "$LOG" 2>/dev/null; }
+
+# --- credential: the same resolver the turn hook uses ----------------------
+# Both scripts used to build their own credential chain, and they disagreed:
+# the turn hook scavenged a Codex MCP header and this one did not, so a Codex
+# user with header auth had capture ON and the inbox OFF. One resolver, one
+# request function, both behaviours identical by construction.
+CRED_LIB="$LIB_DIR/brains-credential.sh"
+[ -r "$CRED_LIB" ] || exit 0
+# shellcheck source=brains-credential.sh
+. "$CRED_LIB" || exit 0
+
+BRAINS_CRED_CLIENT="claude"
+[ "$CODEX_PLUGIN_RUNTIME" = "1" ] && BRAINS_CRED_CLIENT="codex"
+# Same endpoint set the turn hook uses, from the same place — so the
+# session-start signal can find the capture health the turn hook wrote.
+brains_resolve_endpoints "$BASE"
+ENDPOINT="$BRAINS_URL_INBOX"
+ACK_ENDPOINT="$BRAINS_URL_ACK"
+DEVICES_ENDPOINT="$BRAINS_URL_DEVICES"
+
+if ! brains_resolve_credential "$BASE"; then
+  brains_health_note inbox "$ENDPOINT" "$BRAINS_CRED_STATE"
+  # Told here rather than after the gate: the whole point is to say something
+  # when NO credential resolved, which is exactly when everything below is
+  # skipped. Raised on prompt as well as startup, because a token revoked
+  # mid-thread would otherwise lose every remaining turn in silence until the
+  # next session begins. The once-per-cause claim keeps it to a single mention
+  # either way.
+  case "$MODE" in startup|prompt) brains_capture_signal ;; esac
+  exit 0
+fi
+case "$MODE" in startup|prompt) brains_capture_signal ;; esac
 
 # Detect IANA timezone — server uses it to populate users.timezone.
 detect_tz() {
@@ -130,11 +158,13 @@ if [ "$MODE" = "startup" ]; then
     '{hostname:$h, sections:$s, client:$client, client_type:"cli"}
      + (if $pv != "" then {plugin_version:$pv} else {} end)
      + (if $au != "" then {auto_update: ($au == "true")} else {} end)')
-  REPORT_RESP=$(curl -sS --max-time 4 -X POST \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "$REPORT_BODY" \
-    "$DEVICES_ENDPOINT" 2>>"$LOG") || REPORT_RESP=""
+  REPORT_RESP=""
+  if brains_request devices "$DEVICES_ENDPOINT" --max-time 4 -X POST \
+       -H "Content-Type: application/json" -d "$REPORT_BODY"; then
+    REPORT_RESP="$BRAINS_HTTP_BODY"
+  else
+    log "device report failed: status=${BRAINS_HTTP_CODE:-none} source=$BRAINS_CRED_SOURCE"
+  fi
   NEW_DEVICE_ID=$(printf '%s' "$REPORT_RESP" | jq -r '.device_id // empty' 2>/dev/null)
   if [ -n "$NEW_DEVICE_ID" ]; then
     DEVICE_ID="$NEW_DEVICE_ID"
@@ -173,10 +203,20 @@ fi
 DEVICE_QS=""
 [ -n "$DEVICE_ID" ] && DEVICE_QS="&device_id=$DEVICE_ID"
 
-RESP=$(curl -sS --max-time "$TIMEOUT" \
-  -H "Authorization: Bearer $TOKEN" \
-  "$ENDPOINT?session_id=$SESSION&source=$MODE&mode=$MODE$TZ_QS$DEVICE_QS" 2>>"$LOG") \
-  || { log "fetch failed"; exit 0; }
+if ! brains_request inbox "$ENDPOINT?session_id=$SESSION&source=$MODE&mode=$MODE$TZ_QS$DEVICE_QS" \
+       --max-time "$TIMEOUT"; then
+  # A refused credential used to be indistinguishable from an empty inbox: the
+  # old code discarded the status, and an empty body was read as "nothing to
+  # do". Name the difference, so a revocation is visible the day it happens.
+  case "${BRAINS_HTTP_CODE:-}" in
+    401|403) log "inbox rejected: status=$BRAINS_HTTP_CODE source=$BRAINS_CRED_SOURCE" ;;
+    ''|000)  log "fetch failed" ;;
+    *)       log "inbox error: status=$BRAINS_HTTP_CODE" ;;
+  esac
+  [ "$BRAINS_HTTP_BLOCKED" = "1" ] && log "inbox blocked: endpoint origin does not match the signed-in server"
+  exit 0
+fi
+RESP="$BRAINS_HTTP_BODY"
 [ -z "$RESP" ] && exit 0
 printf '%s' "$RESP" | jq -e . >/dev/null 2>&1 || { log "invalid json"; exit 0; }
 
@@ -278,10 +318,16 @@ if [ "${#AUTO_ACK_IDS[@]}" -gt 0 ] || [ "$CTX_ITEMS_LEN" -gt 0 ]; then
      else
         {session_id:$s, mode:$m, applied:$ids, context_received:$ctx}
      end')
-  ( curl -sS --max-time 3 -X POST "$ACK_ENDPOINT" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "$ack" >/dev/null 2>&1 || true ) &
+  # Leased before backgrounding: see brains_cred_lease. Without it the hook's
+  # exit removes the config while this request is still in flight.
+  ack_lease=$(brains_cred_lease) || ack_lease=""
+  if [ -n "$ack_lease" ]; then
+    ( BRAINS_CRED_CONFIG="$ack_lease"
+      trap 'brains_cred_return "$ack_lease"' EXIT INT TERM HUP
+      brains_request ack "$ACK_ENDPOINT" --max-time 3 -X POST \
+        -H "Content-Type: application/json" -d "$ack" >/dev/null 2>&1
+      brains_cred_return "$ack_lease" ) &
+  fi
 fi
 
 exit 0
