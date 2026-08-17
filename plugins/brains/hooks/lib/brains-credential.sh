@@ -33,6 +33,17 @@
 #       enumeration may downgrade it to no-credential. A future failure mode
 #       nobody has thought of fails safe without being enumerated.
 #
+#   I3. CLEANUP RUNS ON EXIT ONLY — NEVER ON A SIGNAL.
+#       A cleanup-only INT/TERM/HUP handler does not re-raise, so bash runs it
+#       and RESUMES: the process stops dying on that signal, and a caller's own
+#       handler never fires. In a sourced library that redefines Ctrl-C for the
+#       whole hook, on the path every working user takes on every turn. Four
+#       separate instances of this were written on one change, so it is stated
+#       once as a rule and enforced by a test over the shipped files rather than
+#       fixed a fifth time. Whatever a signal-killed shell leaves behind is
+#       brains_cred_prune_tmp's job — the story SIGKILL, which is untrappable,
+#       already needed.
+#
 # Beyond those: only brains_request() ever presents the credential, because
 # endpoint URLs are env-overridable and a discovered credential must never reach
 # a host that did not mint it. And every failure returns "no credential" with
@@ -213,7 +224,8 @@ _brains_bounded_read_file() {  # deadline, max-bytes, max-blocks, command...
     # version saved, restored and re-raised in the PARENT — which could never
     # work, because every caller runs this inside a command substitution where
     # trap changes are discarded and `kill $$` targets the wrong shell.
-    trap 'rm -rf "$dir" 2>/dev/null' EXIT INT TERM HUP
+    # EXIT only, per I3.
+    trap 'rm -rf "$dir" 2>/dev/null' EXIT
     set -m
     ( ulimit -f "$maxblocks" 2>/dev/null
       "$@" >"$dir/v" 2>/dev/null
@@ -229,7 +241,7 @@ _brains_bounded_read_file() {  # deadline, max-bytes, max-blocks, command...
     # descendant behind, and the watchdog is the only thing that would reach it.
     kill -TERM -"$_p" 2>/dev/null
     kill $_w 2>/dev/null; wait $_w 2>/dev/null
-    trap - EXIT INT TERM HUP
+    trap - EXIT
   ) >/dev/null 2>&1
   rc=""
   [ -f "$dir/rc" ] && read -r rc <"$dir/rc" 2>/dev/null
@@ -543,12 +555,21 @@ _brains_write_config() {   # source-kind, locator, store-file(optional)
   # installed when the sourcing hook has no EXIT trap of its own — replacing a
   # caller's handler is not this library's call to make. None of the hooks set
   # one; if that changes, the caller must invoke brains_cred_release itself.
+  #
+  # EXIT and nothing else, per I3. This ran on every turn of every working user,
+  # so covering INT here made the turn hook ignore Ctrl-C for the rest of its
+  # run: the handler cleaned up and bash resumed. A signal-killed hook leaves
+  # the directory to brains_cred_prune_tmp instead.
   [ -z "$(trap -p EXIT 2>/dev/null)" ] &&
-    trap 'rm -rf "$BRAINS_CRED_TMP/r.$$.cfg" 2>/dev/null' EXIT INT TERM HUP
+    trap 'rm -rf "$BRAINS_CRED_TMP/r.$$.cfg" 2>/dev/null' EXIT
   return 0
 }
 
-brains_cred_release() { [ -n "$BRAINS_CRED_CONFIG" ] && rm -rf "$(dirname "$BRAINS_CRED_CONFIG")" 2>/dev/null; BRAINS_CRED_CONFIG=""; return 0; }
+# Both of these delete a directory derived from a path, which is the shape that
+# twice reached outside the owned root, so both go through the confined
+# primitive rather than calling rm themselves. Their arguments are internal
+# today; the point is that they stay safe when that stops being true.
+brains_cred_release() { _brains_discard "$BRAINS_CRED_CONFIG"; BRAINS_CRED_CONFIG=""; return 0; }
 
 # A private copy of the config for a request that will outlive this shell.
 #
@@ -571,7 +592,7 @@ brains_cred_lease() {
   printf '%s' "$dir/curl.conf"
 }
 
-brains_cred_return() { [ -n "${1:-}" ] && rm -rf "$(dirname "$1")" 2>/dev/null; return 0; }
+brains_cred_return() { _brains_discard "${1:-}"; return 0; }
 
 # --------------------------------------------------------------- the resolver
 # Sets BRAINS_CRED_* and returns 0 when a credential resolved, 1 otherwise.
@@ -588,7 +609,7 @@ brains_resolve_credential() {
 
 _brains_resolve_credential_impl() {
   local base want store meta line key url name corigin accts acct seen rec recfile
-  local matched matchedfiles count
+  local matched matchedfiles count tab mf
   base="${1:-}"
   BRAINS_CRED_STATE="indeterminate"      # I2: downgrade only on proof
   BRAINS_CRED_SOURCE=""; BRAINS_CRED_BINDING=""; BRAINS_CRED_ORIGIN=""
@@ -720,16 +741,37 @@ EOF2
   fi
 
   matchedfiles=""
-  while IFS=$(printf '\t') read -r key url name recfile; do
+  # Two forks per entry lived in this loop, and the document ceiling that stopped
+  # rejecting large stores turned that into seconds of hot path: a thousand-entry
+  # store cost 4.6s per hook run, twice a turn. `IFS=$(printf '\t')` re-forks a
+  # command substitution on every iteration, so the separator is computed once;
+  # and `brains_origin` is a command substitution too, so the fork-free predicate
+  # is tested FIRST and the origin is only canonicalised for a row that could
+  # still win. Same answers, 2.85s -> 0.25s at 1450 entries.
+  tab=$(printf '\t')
+  while IFS="$tab" read -r key url name recfile; do
     [ -n "$key" ] || continue
     BRAINS_CRED_SAW_ENTRIES=1
-    if ! corigin=$(brains_origin "$url") ||
-       [ "$corigin" != "$want" ] ||
-       ! _brains_is_brains_server "$name"; then
-      # Codex only: on the Claude path every row names the SAME store snapshot,
-      # so discarding here on a non-match would delete the document the matching
-      # rows still need.
-      [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ] && _brains_discard "$recfile"
+    # The total budget is documented as bounding the whole resolution, but until
+    # now it was consulted on the Codex enumeration path only — leaving the very
+    # loop the wider ceiling grew unbounded. Draining rather than breaking, so
+    # the Codex arm's private record files are still discarded here rather than
+    # left for the prune.
+    if ! _brains_budget_left; then
+      BRAINS_CRED_TRUNCATED=1
+      [ "$recfile" != "${store:-}" ] && _brains_discard "$recfile"
+      continue
+    fi
+    if ! _brains_is_brains_server "$name" ||
+       ! corigin=$(brains_origin "$url") ||
+       [ "$corigin" != "$want" ]; then
+      # Only a record file PRIVATE to this row may be discarded here. The Claude
+      # store and the Codex array backend both name one shared snapshot on every
+      # row, and deleting that on the first non-matching row destroys the
+      # document the winner still needs. Keyed on shared-ness itself rather than
+      # on the client, because keying it on the client is what let the array
+      # backend reintroduce the bug after the Claude path was fixed.
+      [ "$recfile" != "${store:-}" ] && _brains_discard "$recfile"
       continue
     fi
     matched="$matched$key
@@ -754,9 +796,22 @@ EOF2
          | [ $keys[] as $i | $a[$i].token_response.access_token ] | unique | length' \
         "$store" 2>/dev/null)
     elif [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ]; then
-      # Keychain backend: one private record file per account.
-      count=$(printf '%s' "$matchedfiles" | tr '\n' '\0' | xargs -0 -n 200 \
-        jq -s '[.[].token_response.access_token] | unique | length' 2>/dev/null | tail -1)
+      # Keychain backend: one private record file per account, and
+      # BRAINS_CRED_MAX_CANDIDATES caps that at eight. The earlier version piped
+      # the list through `xargs -0 -n 200 ... | tail -1`, which could never batch
+      # at that cap and would have reported the LAST batch's count rather than
+      # the union of all of them if it ever did — reading two aliases of one
+      # bearer as one credential in one batch and as an ambiguity in another. So
+      # the list becomes one argument vector, which at eight entries cannot
+      # split. The positional parameters are free here: $1 was read into `base`
+      # at the top and is not used again.
+      set --
+      while IFS= read -r mf; do
+        [ -n "$mf" ] && set -- "$@" "$mf"
+      done <<EOF4
+$matchedfiles
+EOF4
+      count=$(jq -s '[.[].token_response.access_token] | unique | length' "$@" 2>/dev/null)
     else
       count=$(jq -r --argjson keys "$(printf '%s' "$matched" | jq -Rs 'split("\n") | map(select(length>0))')" \
         '[ $keys[] as $k | .mcpOAuth[$k].accessToken ] | unique | length' "$store" 2>/dev/null)
@@ -768,18 +823,19 @@ EOF2
 
   # Metadata pass files are no longer needed once counting is done; the winner's
   # is kept just long enough to generate the config below.
-  # Codex only: there the retained files are one private record per account. On
-  # the Claude path the same column is the single store snapshot, which is
-  # discarded on its own — sweeping it here would delete the document out from
-  # under config generation.
+  #
+  # Same shared-ness rule as the selection loop: a row naming the shared store
+  # snapshot is skipped, because that document is discarded once on its own and
+  # sweeping it here would pull it out from under config generation. The path
+  # confinement that used to be repeated here now lives in _brains_discard.
   _brains_discard_matched() {
     local f keep
-    [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ] || return 0
     keep="${1:-}"
     while IFS= read -r f; do
       [ -n "$f" ] || continue
       [ "$f" = "$keep" ] && continue
-      case "$f" in "$BRAINS_CRED_TMP"/*) _brains_discard "$f" ;; esac
+      [ "$f" = "${store:-}" ] && continue
+      _brains_discard "$f"
     done <<EOF3
 $matchedfiles
 EOF3
@@ -852,21 +908,25 @@ EOF3
 # applied only if still the highest. Atomic rename alone is not enough: it makes
 # each write torn-free but leaves the read-modify-write open to a lost update.
 # No wall clock is read anywhere here, so a clock step cannot reorder anything.
-BRAINS_HEALTH_NS="default"
-_brains_health_ns_cache_key=""
+#
+# There is deliberately NO memo across calls here. Every call site is a command
+# substitution, so anything this function assigns dies with its subshell — a
+# cache written that way is inert by construction, and one was: five
+# brains_health_note calls left the cache key empty and still forked `shasum`
+# thirty times. That is the same command-substitution mistake this file's
+# comments already cite twice, and the fix for the third instance is to stop
+# writing the pattern rather than to guard it again. Roughly six forks per hook
+# run, on a path that is already making a network request; if that ever matters,
+# the answer is to hoist the namespace into the CALLER, not to memo in a
+# subshell.
 _brains_health_ns_for() {
-  local url origin key
+  local url origin key ns
   url="${1:-}"
-  if [ "$url" = "$_brains_health_ns_cache_key" ]; then
-    printf '%s' "$BRAINS_HEALTH_NS"
-    return 0
-  fi
   origin=$(brains_origin "$url") || origin="$url"
   key="${BRAINS_CRED_CLIENT:-claude}|$origin"
-  BRAINS_HEALTH_NS=$(printf '%s' "$key" | shasum -a 256 2>/dev/null | cut -c1-12)
-  [ -n "$BRAINS_HEALTH_NS" ] || BRAINS_HEALTH_NS="default"
-  _brains_health_ns_cache_key="$url"
-  printf '%s' "$BRAINS_HEALTH_NS"
+  ns=$(printf '%s' "$key" | shasum -a 256 2>/dev/null | cut -c1-12)
+  [ -n "$ns" ] || ns="default"
+  printf '%s' "$ns"
 }
 
 _brains_health_dir() {   # capability, url
@@ -977,10 +1037,16 @@ brains_health_claim_signal() {   # key, url
 # that cries wolf on flaky wifi is how people learn to ignore the one that
 # matters.
 # Codex reads its MCP sign-in from the macOS keychain, and Codex on Linux is not
-# a supported configuration. So on that platform there is no step to name: the
-# hooks cannot reach the sign-in, and pointing the user at a token would be
-# documenting a path the product does not support. Echoes an empty string, and
-# the caller drops the remedy clause rather than inventing one.
+# a supported configuration. So on that platform there is no SIGN-IN step to
+# name and _brains_signin_step echoes nothing, leaving the caller to drop the
+# remedy clause rather than invent one.
+#
+# What that does NOT mean is that nothing works there. The explicit-token branch
+# is platform-independent — BRAINS_API_TOKEN resolves and captures on Linux
+# exactly as it does on macOS — so a note claiming there is "nothing to change"
+# was measurably false, and core.md tells the agent these notes are
+# authoritative. The product decision stands; the wording now matches what the
+# code does.
 _brains_codex_unsupported_here() {
   [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ] && ! command -v security >/dev/null 2>&1
 }
@@ -994,9 +1060,22 @@ _brains_signin_step() {
   fi
 }
 
+# Two shapes, and the difference is whether an ACTION is attached.
+#
+# _brains_emit_signal carries a remedy, so it ends with the offer protocol. A
+# note with no remedy must not: telling the agent there is nothing to do and
+# then instructing it to "offer this and act if they say yes" is a contradiction
+# it has to resolve on its own, and the way an agent resolves that is by
+# inventing a command to offer. So a stateless note gets its own tail.
 _brains_emit_signal() {  # key, url, label, remedy
   brains_health_claim_signal "$1" "$2" || return 1
   printf '%s\n' '<!-- brains:capture -->'"$3"' is OFF: '"$4"' Offer this to the user once, in one line, and act only if they say yes. Do not repeat it later in the session.<!-- /brains:capture -->'
+  return 0
+}
+
+_brains_emit_note() {    # key, url, label, explanation
+  brains_health_claim_signal "$1" "$2" || return 1
+  printf '%s\n' '<!-- brains:capture -->'"$3"' is OFF: '"$4"' There is nothing for you to offer here. Say it once if it is relevant and do not repeat it later in the session.<!-- /brains:capture -->'
   return 0
 }
 
@@ -1012,8 +1091,8 @@ brains_capture_signal() {
     case "$state" in
       no-credential)
         if _brains_codex_unsupported_here; then
-          _brains_emit_signal no-credential "$url" 'Conversation capture and the brains inbox' \
-            "brains does not support Codex on this platform, so there is nothing to turn on and nothing to change. Mention it once if it is relevant and do not offer a fix." && return 0
+          _brains_emit_note no-credential "$url" 'Conversation capture and the brains inbox' \
+            "brains reads the Codex sign-in from the macOS keychain, and there is none to read on this platform. An explicit \`BRAINS_API_TOKEN\` does turn capture on here, but Codex on this platform is not a configuration brains supports, so brains does not ask you to set one." && return 0
           return 1
         fi
         _brains_emit_signal no-credential "$url" 'Conversation capture and the brains inbox' \

@@ -362,9 +362,15 @@ const CODEX_INSTALL_REGION = [
   "runs automatic recall and error feedback. Capture and inbox delivery use the",
   "sign-in above as their credential, so there is nothing further to set.",
   "",
-  "Capture and the inbox are **macOS only** for Codex: they read the credential",
-  "from the macOS keychain, and Codex on Linux is not a supported configuration.",
-  "The tools and recall still work there; capture and inbox delivery do not.",
+  // "capture and inbox delivery do not [work there]" was false: the explicit-token
+  // branch is platform independent and captures on Linux exactly as on macOS. The
+  // product decision stands — what changed is that the copy now says which part
+  // is unavailable (the sign-in) rather than claiming the feature is.
+  "Capture and the inbox are **macOS only** for Codex: they read the sign-in from",
+  "the macOS keychain, so on Linux there is none for them to read and they stay",
+  "off. The tools and recall are unaffected. The optional capture token below does",
+  "drive capture there, but Codex on Linux is not a configuration brains supports",
+  "or tests.",
   "",
   "Everyday reading and writing is covered by default. For admin-gated tools or",
   "performance insights, sign in asking for them explicitly (both also need the",
@@ -2309,75 +2315,211 @@ assert(
   "README must be exactly the approved regions, in order, with nothing between them — every byte this file publishes belongs to one constant here, so text added at a seam or in a section no pin covers fails right here",
 );
 
-assert(
-  turnHook.includes('CLIENT="claude"'),
-  "shared turn hook must default Claude Code captures to the Claude CLI",
-);
-assert(
-  turnHook.includes('[ -n "${PLUGIN_ROOT:-}" ] && CLIENT="codex"'),
-  "shared turn hook must identify the Codex plugin runtime as the Codex CLI",
-);
+// WHY CODE-ONLY REGIONS, not substrings — the same lesson as the skill artifacts
+// above, learned again on this file's own assertions.
+//
+// These pins were `credLib.includes("ambiguous")` and friends. A substring
+// match over a shell file is satisfied by a COMMENT, and three of them already
+// were: gutting every non-comment line that mentioned "ambiguous" left the
+// assertion "resolver must refuse when more than one distinct candidate
+// matches" passing, carried entirely by the prose above it. The two "must
+// source the shared credential resolver" pins were being carried by a
+// `# shellcheck source=` directive — so the guard against the two hooks
+// re-growing separate credential chains, which is the whole reason this task
+// exists, asserted nothing.
+//
+// codeOnly() strips comments and blank lines before matching, so a comment
+// CANNOT satisfy one of these by construction. That is the property, not a
+// stricter string.
+const codeOnly = (text: string): string =>
+  text.split("\n").filter((l) => l.trim() !== "" && !/^\s*#/.test(l)).join("\n");
+
+const TURN_CLIENT_DETECTION_REGION = [
+  "CLIENT=\"claude\"",
+  "[ -n \"${PLUGIN_ROOT:-}\" ] && CLIENT=\"codex\"",
+].join("\n");
+
+const TURN_SOURCES_RESOLVER_REGION = [
+  "[ -r \"$CRED_LIB\" ] || exit 0",
+  ". \"$CRED_LIB\" || exit 0",
+].join("\n");
+
+const INBOX_SOURCES_RESOLVER_REGION = [
+  "[ -r \"$CRED_LIB\" ] || exit 0",
+  ". \"$CRED_LIB\" || exit 0",
+].join("\n");
+
+// Three things this region has to hold at once, and each of them was a defect
+// before it was a pin. The separator is hoisted and the fork-free predicate is
+// tested first, because two command substitutions per entry cost seconds on a
+// store the document ceiling now admits. The loop consults the total budget, so
+// the ceiling cannot make it unbounded. And a non-matching row may only discard
+// a record file PRIVATE to it — keyed on shared-ness, not on the client, since
+// the client check let the array backend delete the snapshot every row shares.
+const RESOLVER_SELECTION_REGION = [
+  "  tab=$(printf '\\t')",
+  "  while IFS=\"$tab\" read -r key url name recfile; do",
+  "    [ -n \"$key\" ] || continue",
+  "    BRAINS_CRED_SAW_ENTRIES=1",
+  "    if ! _brains_budget_left; then",
+  "      BRAINS_CRED_TRUNCATED=1",
+  "      [ \"$recfile\" != \"${store:-}\" ] && _brains_discard \"$recfile\"",
+  "      continue",
+  "    fi",
+  "    if ! _brains_is_brains_server \"$name\" ||",
+  "       ! corigin=$(brains_origin \"$url\") ||",
+  "       [ \"$corigin\" != \"$want\" ]; then",
+  "      [ \"$recfile\" != \"${store:-}\" ] && _brains_discard \"$recfile\"",
+  "      continue",
+  "    fi",
+  "    matched=\"$matched$key",
+  "\"",
+  "    matchedfiles=\"$matchedfiles$recfile",
+  "\"",
+  "    count=$((count + 1))",
+  "  done <<EOF2",
+  "$meta",
+  "EOF2",
+].join("\n");
+
+const RESOLVER_DECISION_REGION = [
+  "  if [ \"$BRAINS_CRED_TRUNCATED\" = \"1\" ]; then",
+  "    BRAINS_CRED_STATE=\"indeterminate\"",
+  "    _brains_discard \"${store:-}\"; _brains_discard_matched",
+  "    return 1",
+  "  fi",
+  "  if [ \"$count\" -eq 0 ]; then",
+  "    if [ \"$BRAINS_CRED_SAW_ENTRIES\" = \"1\" ]; then",
+  "      BRAINS_CRED_STATE=\"blocked\"",
+  "    else",
+  "      BRAINS_CRED_STATE=\"no-credential\"",
+  "    fi",
+  "    _brains_discard \"${store:-}\"; _brains_discard_matched",
+  "    return 1",
+  "  fi",
+  "  if [ \"$count\" -gt 1 ]; then",
+  "    BRAINS_CRED_STATE=\"indeterminate\"",
+  "    _brains_discard \"${store:-}\"; _brains_discard_matched",
+  "    return 1",
+  "  fi",
+  "  key=\"${matched%%",
+].join("\n");
+
+const RESOLVER_TRANSPORT_TRUTH_REGION = [
+  "  crc=$?",
+  "  code=\"${resp##*$'\\n'}\"",
+  "  body=\"${resp%$'\\n'*}\"",
+  "  if [ \"$crc\" -ne 0 ]; then",
+  "    BRAINS_HTTP_CODE=\"$code\"",
+  "    brains_health_apply \"$cap\" \"$url\" \"$gen\" \"unreachable\"",
+  "    return 1",
+  "  fi",
+].join("\n");
+
+const RESOLVER_CLAUDE_SERVICE_REGION = [
+  "_brains_claude_service() {",
+  "  local dir hash",
+  "  if [ -n \"${CLAUDE_SECURESTORAGE_CONFIG_DIR+set}\" ]; then",
+  "    dir=\"$CLAUDE_SECURESTORAGE_CONFIG_DIR\"",
+  "  elif [ -n \"${CLAUDE_CONFIG_DIR:-}\" ]; then",
+  "    dir=\"$CLAUDE_CONFIG_DIR\"",
+  "  else",
+  "    dir=\"\"",
+  "  fi",
+  "  if [ -z \"$dir\" ]; then",
+  "    printf '%s' 'Claude Code-credentials'",
+  "    return 0",
+  "  fi",
+  "  hash=$(printf '%s' \"$dir\" | shasum -a 256 2>/dev/null | cut -c1-8)",
+  "  [ -n \"$hash\" ] || return 1",
+  "  printf 'Claude Code-credentials-%s' \"$hash\"",
+  "}",
+].join("\n");
+
+const assertRegion = (source: string, region: string, message: string): void =>
+  assert(codeOnly(source).includes(region), message);
+
+// Client detection: which CLI a capture is attributed to. Codex defines
+// PLUGIN_ROOT; Claude Code invokes the explicit hook map without it.
+assertRegion(turnHook, TURN_CLIENT_DETECTION_REGION,
+  "turn hook must detect the client exactly as approved — Claude by default, Codex when the plugin runtime sets PLUGIN_ROOT");
 assert(
   turnHook.includes('client:$client, client_type:"cli"'),
   "turn ingest payload must include the detected client and CLI type",
 );
-// The credential chain moved out of the turn hook into a shared resolver, because the two hooks
-// had drifted: the turn hook scavenged a Codex MCP header and the inbox engine did not, so a Codex
-// user with header auth had capture ON and the inbox OFF. Both now source the same file, and that
-// is what these assertions hold — a second private chain reappearing in either hook is the
-// regression, and it cannot be caught by looking at only one of them.
+
+// ONE resolver, sourced by BOTH hooks. They had drifted: the turn hook
+// scavenged a Codex MCP header and the inbox engine did not, so a Codex user
+// with header auth had capture ON and the inbox OFF. A second private chain
+// re-appearing in either hook is the regression, and it cannot be caught by
+// looking at only one of them.
+assertRegion(turnHook, TURN_SOURCES_RESOLVER_REGION,
+  "turn hook must source the shared credential resolver, not build its own chain");
+assertRegion(inboxHook, INBOX_SOURCES_RESOLVER_REGION,
+  "inbox engine must source the shared credential resolver, not build its own chain");
 for (const [name, hook] of [["turn hook", turnHook], ["inbox engine", inboxHook]] as const) {
-  assert(
-    hook.includes("brains-credential.sh"),
-    `${name} must source the shared credential resolver, not build its own chain`,
-  );
   assert(
     !/Authorization: Bearer/.test(hook),
     `${name} must not attach an Authorization header itself — brains_request owns the credential, so no other code can send it to an unchecked host`,
   );
 }
-assert(
-  credLib.includes("codex mcp get"),
-  "resolver must still reuse a persisted Codex MCP Authorization header when no token env is present",
-);
-assert(
-  credLib.includes(".transport.http_headers.Authorization"),
-  "resolver must read the configured MCP Authorization header",
-);
-// Measured on codex-cli 0.147.0: with the plugin installed, `codex mcp get brains --json` reports
-// `"http_headers": null`, because Codex stores its OAuth credential in the keychain instead. The
-// header scavenge is therefore correct only for someone who ran `codex mcp add --header ...` by
-// hand, and the keychain read is what covers everyone else.
-assert(
-  credLib.includes("Codex MCP Credentials"),
-  "resolver must read the Codex MCP OAuth keychain — the header scavenge alone reaches almost nobody",
-);
-assert(
-  credLib.includes("Claude Code-credentials"),
-  "resolver must read the Claude Code credential store",
-);
-// Selection is by ORIGIN, never by server name. This machine's Codex store holds three entries all
-// named "brains" — two dead localhost stubs and one STAGE — so a name match picks arbitrarily
-// between a token for a dead server and a stage token pointed at production.
-assert(
-  credLib.includes("brains_origin"),
-  "resolver must select stored credentials by canonical origin",
-);
-// Neither store records WHICH ACCOUNT a token belongs to, so two candidates for one origin cannot
-// be told apart. Capturing into the wrong brain is worse than a 401, because a 401 is detectable.
-assert(
-  credLib.includes("ambiguous"),
-  "resolver must refuse when more than one distinct candidate matches, rather than guess",
-);
-// Transport truth. curl writes %{http_code} as soon as headers arrive, so a transfer that dies
-// mid-body still reports 200 — and the truncated body can be valid JSON that parses. Measured:
-// curl_exit=18, http_code=200, body {"device_id":"d1"}. Only the exit status separates them.
-assert(
-  /crc=\$\?/.test(credLib) && credLib.includes('[ "$crc" -ne 0 ]'),
-  "brains_request must treat any non-zero curl exit as a transport failure regardless of HTTP code",
-);
-// A universal -o /dev/null would have silently killed device-id caching, drift nudges and the
-// whole inbox delivery path while every status-code assertion stayed green.
+
+// Selection: by canonical ORIGIN *and* server identity, never by name alone.
+// This machine's Codex store holds three entries all named "brains" — two dead
+// localhost stubs and one STAGE — so a name match picks arbitrarily between a
+// token for a dead server and a stage token pointed at production.
+assertRegion(credLib, RESOLVER_SELECTION_REGION,
+  "resolver must select stored credentials by canonical origin AND brains server identity");
+
+// The refusal. Neither store records WHICH ACCOUNT a token belongs to, so two
+// candidates for one origin cannot be told apart; capturing into the wrong
+// brain is worse than a 401, because a 401 is detectable. An incomplete scan is
+// the same answer for the same reason — it might have found a second one.
+assertRegion(credLib, RESOLVER_DECISION_REGION,
+  "resolver must refuse when more than one distinct candidate matches, or when the scan was incomplete, rather than guess");
+
+// Transport truth. curl writes %{http_code} as soon as headers arrive, so a
+// transfer that dies mid-body still reports 200 — and the truncated body can be
+// valid JSON that parses. Measured: curl_exit=18, http_code=200, body
+// {"device_id":"d1"}. Only the exit status separates them.
+assertRegion(credLib, RESOLVER_TRANSPORT_TRUTH_REGION,
+  "brains_request must treat any non-zero curl exit as a transport failure regardless of HTTP code");
+
+// The Claude store's service name is a factual contract with Claude Code, and
+// the suffix rule for a non-default config dir is what keeps one profile from
+// reading another's credential. Neither is exercised by the fixture-file path
+// the credential suite uses, so it is pinned as authored code here.
+assertRegion(credLib, RESOLVER_CLAUDE_SERVICE_REGION,
+  "resolver must derive the Claude Code credential service exactly as the client does, and probe no alternative");
+
+// And a guard against this class regrowing. A POSITIVE substring match over a
+// shell file is satisfiable by a comment, which is how three pins here came to
+// assert nothing; the fix is codeOnly()/assertRegion(), and this makes reaching
+// for the weaker form fail loudly instead of merging quietly. Negative matches
+// are exempt: a comment containing the banned text FAILS them, so they are
+// over-strict rather than vacuous — the opposite failure mode.
+{
+  const selfSource = readFileSync(join(ROOT, "tests", "plugin-contract", "run.ts"), "utf8");
+  const APPROVED_POSITIVE_SUBSTRING_PINS = [
+    // Held by code — the string appears in no comment, and gutting it fails the
+    // assertion. Verified by mutation.
+    `turnHook.includes('client:$client, client_type:"cli"')`,
+  ];
+  const offenders = selfSource
+    .split("\n")
+    .map((line, i) => ({ line: line.trim(), n: i + 1 }))
+    .filter(({ line }) => /^(credLib|turnHook|inboxHook|hook)\.includes\(/.test(line))
+    .filter(({ line }) => !APPROVED_POSITIVE_SUBSTRING_PINS.some((ok) => line.startsWith(ok)));
+  assert(
+    offenders.length === 0,
+    `positive substring pins over shipped shell source are satisfiable by a comment — use assertRegion() with a codeOnly region instead, or add a mutation-proved exception to APPROVED_POSITIVE_SUBSTRING_PINS: ${offenders.map((o) => `:${o.n} ${o.line}`).join("; ")}`,
+  );
+}
+
+// A universal -o /dev/null would have silently killed device-id caching, drift
+// nudges and the whole inbox delivery path while every status-code assertion
+// stayed green. Negative pins cannot be satisfied by a comment — a comment
+// containing the banned text FAILS them — so these stay as substring bans.
 assert(
   !credLib.includes("-o /dev/null"),
   "brains_request must preserve response bodies — the device report and inbox GET are parsed from them",
@@ -2582,12 +2724,26 @@ try {
     );
   } else {
     assert(
-      /does not support Codex on this platform/.test(firstSignal),
-      "without the macOS keychain the Codex off-state must say the platform is unsupported",
+      /reads the Codex sign-in from the macOS keychain/.test(firstSignal) &&
+        /not a configuration brains supports/.test(firstSignal),
+      "without the macOS keychain the Codex off-state must say why the sign-in cannot be read",
     );
     assert(
-      !/mcp login/.test(firstSignal) && !/BRAINS_API_TOKEN/.test(firstSignal),
-      "…and must offer no remedy, because there is no supported action to take",
+      !/mcp login/.test(firstSignal),
+      "…and must name no sign-in step, because there is none to read on this platform",
+    );
+    // It must not say there is nothing to change, either. BRAINS_API_TOKEN
+    // resolves and captures here — the branch is platform independent — so the
+    // old wording was false in a note core.md tells the agent is authoritative.
+    assert(
+      !/nothing to change/.test(firstSignal),
+      "…and must not claim nothing would change it, which is measurably false",
+    );
+    // No action, so no offer protocol: a note that says there is nothing to do
+    // and then tells the agent to offer it leaves the agent to invent one.
+    assert(
+      !/Offer this to the user/.test(firstSignal) && /nothing for you to offer/.test(firstSignal),
+      "…and a note with no action must not carry the offer tail",
     );
   }
   const secondSignal = spawnSync(

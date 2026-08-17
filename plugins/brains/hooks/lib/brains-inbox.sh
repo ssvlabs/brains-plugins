@@ -323,7 +323,7 @@ if [ "${#AUTO_ACK_IDS[@]}" -gt 0 ] || [ "$CTX_ITEMS_LEN" -gt 0 ]; then
   ack_lease=$(brains_cred_lease) || ack_lease=""
   if [ -n "$ack_lease" ]; then
     ( BRAINS_CRED_CONFIG="$ack_lease"
-      trap 'brains_cred_return "$ack_lease"' EXIT INT TERM HUP
+      trap 'brains_cred_return "$ack_lease"' EXIT
       brains_request ack "$ACK_ENDPOINT" --max-time 3 -X POST \
         -H "Content-Type: application/json" -d "$ack" >/dev/null 2>&1
       brains_cred_return "$ack_lease" ) &

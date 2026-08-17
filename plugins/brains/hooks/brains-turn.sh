@@ -141,7 +141,7 @@ ingest() {  # role, content
     # unauthenticated.
     _lease=$(brains_cred_lease) || return 0
     ( BRAINS_CRED_CONFIG="$_lease"
-      trap 'brains_cred_return "$_lease"' EXIT INT TERM HUP
+      trap 'brains_cred_return "$_lease"' EXIT
       ingest_once "$role" "$payload"
       brains_cred_return "$_lease" ) &
   fi

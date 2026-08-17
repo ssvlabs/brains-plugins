@@ -39,9 +39,11 @@ plugin loads, open `/hooks` and trust the bundled brains hooks — that is what
 runs automatic recall and error feedback. Capture and inbox delivery use the
 sign-in above as their credential, so there is nothing further to set.
 
-Capture and the inbox are **macOS only** for Codex: they read the credential
-from the macOS keychain, and Codex on Linux is not a supported configuration.
-The tools and recall still work there; capture and inbox delivery do not.
+Capture and the inbox are **macOS only** for Codex: they read the sign-in from
+the macOS keychain, so on Linux there is none for them to read and they stay
+off. The tools and recall are unaffected. The optional capture token below does
+drive capture there, but Codex on Linux is not a configuration brains supports
+or tests.
 
 Everyday reading and writing is covered by default. For admin-gated tools or
 performance insights, sign in asking for them explicitly (both also need the

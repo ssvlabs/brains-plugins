@@ -6,25 +6,48 @@
 // that process could never answer the request it exists to answer. The suite
 // would deadlock rather than fail, and a hang reports nothing at all.
 //
-// Usage: node stubs.js <hits-log> <primary-port> <other-port> <truncator-port>
+// The ports are EPHEMERAL and reported back through a file. Fixed ports made
+// the suite non-deterministic: a previous run's stubs are still bound for a
+// moment after it exits, so the next run's listen() failed while its readiness
+// probe was answered by the dying process — requests then landed in the old
+// run's receipt log and assertions about "did this arrive" read zero. Two runs
+// at once, which is all a CI runner has to do, produced the same thing. Letting
+// the kernel choose removes the shared resource rather than timing around it.
+//
+// Usage: node stubs.js <hits-log> <ports-file>
 const http = require("http"), net = require("net"), fs = require("fs");
 const LOG = process.argv[2];
-const PRIMARY = Number(process.argv[3]), OTHER = Number(process.argv[4]), TRUNCATOR = Number(process.argv[5]);
+const PORTS = process.argv[3];
 const log = (port, req, body) => fs.appendFileSync(LOG, JSON.stringify({
   port, method: req.method, path: (req.url || "").split("?")[0],
   auth: req.headers.authorization || "", bodyLen: body.length,
 }) + "\n");
-const mk = (port, handler) => http.createServer((req, res) => {
-  let b = "";
-  req.on("data", (c) => { b += c; });
-  req.on("end", () => {
-    log(port, req, b);
-    const r = handler(req.url || "");
-    res.writeHead(r.code, { "content-type": "application/json" });
-    res.end(r.body);
+const ready = {};
+const announce = () => {
+  if (Object.keys(ready).length !== 4) return;
+  // Written whole and renamed: a reader polling for this file must never see a
+  // half-written object and parse it as a port number.
+  fs.writeFileSync(`${PORTS}.tmp`, JSON.stringify(ready));
+  fs.renameSync(`${PORTS}.tmp`, PORTS);
+};
+const listen = (name, server, onListen) => {
+  server.on("error", (e) => { process.stderr.write(`${name}: ${e.message}\n`); process.exit(1); });
+  server.listen(0, "127.0.0.1", () => { ready[name] = server.address().port; (onListen || (() => {}))(); announce(); });
+};
+const mk = (name, handler) => {
+  const server = http.createServer((req, res) => {
+    let b = "";
+    req.on("data", (c) => { b += c; });
+    req.on("end", () => {
+      log(ready[name], req, b);
+      const r = handler(req.url || "");
+      res.writeHead(r.code, { "content-type": "application/json" });
+      res.end(r.body);
+    });
   });
-}).listen(port, "127.0.0.1");
-mk(PRIMARY, (p) => {
+  listen(name, server);
+};
+mk("primary", (p) => {
   if (p.startsWith("/forbidden")) return { code: 403, body: '{"error":"forbidden"}' };
   // Returns something the inbox engine must ACK, so a test can exercise the
   // acknowledgement path — and therefore its credential lease.
@@ -33,14 +56,17 @@ mk(PRIMARY, (p) => {
   if (p.startsWith("/inbox/claude")) return { code: 200, body: JSON.stringify({ actions: [] }) };
   return { code: 200, body: '{"ok":true}' };
 });
-mk(OTHER, () => ({ code: 200, body: '{"ok":true}' }));
+mk("other", () => ({ code: 200, body: '{"ok":true}' }));
 // Valid headers plus a COMPLETE, parseable JSON prefix, then the socket dies.
 // curl reports 200 for this, because the status is written the moment headers
 // arrive — only its exit status reveals that the body never finished.
-net.createServer((s) => {
+listen("truncator", net.createServer((s) => {
   s.on("data", () => {
     s.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 400\r\n\r\n");
     s.write('{"device_id":"d1"}');
     setTimeout(() => s.destroy(), 80);
   });
-}).listen(TRUNCATOR, "127.0.0.1");
+}));
+// Accepts and never answers: the only way to show that a call site without its
+// own ceiling would hang forever.
+listen("blackhole", net.createServer(() => {}));
