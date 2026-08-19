@@ -44,7 +44,25 @@ fi
 #    hook that runs automatically with the user's token in env. Removed until
 #    we have an out-of-repo allowlist / fingerprint mechanism.)
 
-# 4. Inbox engine (device report + full inbox + ack). Emits its own context.
+# 4. Housekeeping. Per-session marker files (now-*, toolerr-seen-*, capok-*)
+#    are written by the turn and tool-error hooks and nothing ever removed
+#    them, so the data dir grew without bound. Also sweeps read directories
+#    orphaned by SIGKILL, which is untrappable and so leaves no other cleanup.
+#    Best effort, never fatal, no output.
+CRED_LIB="$HOOK_DIR/lib/brains-credential.sh"
+STATE_DIR="${BRAINS_STATE_DIR:-${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/brains}}}"
+if [ -d "$STATE_DIR" ]; then
+  find "$STATE_DIR" -maxdepth 1 -type f \
+    \( -name 'now-*' -o -name 'toolerr-seen-*' -o -name 'capok-*' \) \
+    -mtime +7 -delete 2>/dev/null
+fi
+if [ -r "$CRED_LIB" ]; then
+  # shellcheck source=lib/brains-credential.sh
+  . "$CRED_LIB" 2>/dev/null && brains_cred_prune_tmp
+fi
+
+# 5. Inbox engine (device report + full inbox + ack). Emits its own context,
+#    including the one-time capture-off signal when no credential resolves.
 [ -x "$LIB" ] && "$LIB" startup "$SESSION"
 
 exit 0

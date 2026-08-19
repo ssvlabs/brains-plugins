@@ -1,7 +1,7 @@
 {
   "name": "brains",
   "description": "Your memory layer: Gmail, Calendar, Drive, and prior Claude conversations as queryable pages, with reflexive recall, hook-driven turn-by-turn capture and inbox delivery, and boards/automations/workflows on top.",
-  "version": "2.9.1",
+  "version": "2.9.2",
   "author": {
     "name": "brains (ssvlabs)"
   },
@@ -11,7 +11,7 @@
     "token": {
       "type": "string",
       "title": "brains API token (optional)",
-      "description": "Optional. Enables conversation capture and the inbox, which authenticate separately from the MCP server. NOT how the brains tools authenticate — that is `claude mcp login plugin:brains:brains`. Find it in your brains account settings; without one, capture and the inbox simply stay off.",
+      "description": "Optional override. Conversation capture and the inbox follow your MCP sign-in — `claude mcp login plugin:brains:brains` — and need nothing set here. Use this only to capture into a different brains account, or to reach a self-hosted endpoint your sign-in does not cover. Find it in your brains account settings.",
       "sensitive": true,
       "required": false
     },

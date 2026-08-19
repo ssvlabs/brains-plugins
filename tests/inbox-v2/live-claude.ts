@@ -106,6 +106,8 @@ async function runClaude(opts: {
   return new Promise((resolveRun) => {
     const env = {
       ...process.env,
+      // Hermetic: never let a real developer credential resolve in a test.
+      BRAINS_CREDENTIAL_STORE_DISABLED: "1",
       BRAINS_STATE_DIR: HOOK_DIR,
       // Pin marketplaces to an absent path so the auto-update nudge stays
       // hermetic and never reads the developer's real ~/.claude.

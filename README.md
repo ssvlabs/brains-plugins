@@ -36,8 +36,14 @@ keep. Confirm with `codex mcp list`: brains should read **OAuth**.
 
 Restart the ChatGPT desktop app or start a new Codex thread. The first time the
 plugin loads, open `/hooks` and trust the bundled brains hooks — that is what
-runs automatic recall and error feedback. Capture and inbox delivery also need a
-capture credential — normally the token below.
+runs automatic recall and error feedback. Capture and inbox delivery use the
+sign-in above as their credential, so there is nothing further to set.
+
+Capture and the inbox are **macOS only** for Codex: they read the sign-in from
+the macOS keychain, so on Linux there is none for them to read and they stay
+off. The tools and recall are unaffected. The optional capture token below does
+drive capture there, but Codex on Linux is not a configuration brains supports
+or tests.
 
 Everyday reading and writing is covered by default. For admin-gated tools or
 performance insights, sign in asking for them explicitly (both also need the
@@ -56,12 +62,15 @@ codex plugin add brains@brains
 codex mcp login brains
 ```
 
-### Optional: conversation capture and the inbox
+### Optional: an explicit capture token
 
-The tools above work without this. Capture and the inbox are shell hooks that
-authenticate separately from the MCP server and cannot read the credential Codex
-keeps internally, so they need a brains API token of their own — find it in your
-brains account settings. Without one they simply stay off.
+You do not need this. Capture and the inbox read the credential `codex mcp login
+brains` already stored, so the sign-in above is all they need. To check what has
+been captured, ask brains which chats it has, or run
+`list_pages type=chat_session`.
+
+Set a token to capture into a different brains account, or to reach an endpoint
+your sign-in does not cover — find it in your brains account settings:
 
 ```sh
 export BRAINS_API_TOKEN="<your token>"
@@ -105,7 +114,8 @@ command, update Claude Code.
 
 Restart Claude Code or start a new session. The first time the plugin loads, trust the bundled
 brains hooks — that is what runs automatic recall and error feedback. Capture and inbox delivery
-also need the token below.
+use the sign-in above as their credential, so there is normally nothing further to set. If
+`list_pages type=chat_session` shows nothing after a few turns, set the token below.
 
 For a local checkout under development:
 
@@ -115,14 +125,14 @@ claude plugin install brains@brains
 claude mcp login plugin:brains:brains
 ```
 
-### Optional: conversation capture and the inbox
+### Optional: an explicit capture token
 
-The tools above work without this. Capture and the inbox are shell hooks that authenticate
-separately from the MCP server and cannot read the credential Claude Code keeps internally, so
-they need a brains API token of their own — find it in your brains account settings. Without one
-they simply stay off.
+You do not need this. Capture and the inbox read the credential `claude mcp login
+plugin:brains:brains` already stored, so the sign-in above is all they need. To check what has
+been captured, ask brains which chats it has, or run `list_pages type=chat_session`.
 
-Set it when you install:
+Set a token only to capture into a different brains account, or to reach an endpoint your sign-in
+does not cover — find it in your brains account settings:
 
 ```sh
 claude plugin install brains@brains --config token="<your token>"

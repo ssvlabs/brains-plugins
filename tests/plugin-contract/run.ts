@@ -278,11 +278,12 @@ const CLAUDE_WEB_REGION = [
 // prone to false positives, so the wording itself is the contract; the regex pair further down
 // stays only as a backstop.
 const CLAUDE_TOKEN_TITLE = "brains API token (optional)";
+// The old copy ended "without one, capture and the inbox simply stay off". That stopped being
+// true the moment the hooks learned to resolve the credential from the client's own MCP sign-in,
+// and copy that describes a gate which no longer exists is how a user concludes the feature is
+// opt-in and never looks again. The token is an override now, and the text has to say so.
 const CLAUDE_TOKEN_DESCRIPTION =
-  "Optional. Enables conversation capture and the inbox, which authenticate separately from the " +
-  "MCP server. NOT how the brains tools authenticate — that is `claude mcp login " +
-  "plugin:brains:brains`. Find it in your brains account settings; without one, capture and the " +
-  "inbox simply stay off.";
+  "Optional override. Conversation capture and the inbox follow your MCP sign-in — `claude mcp login plugin:brains:brains` — and need nothing set here. Use this only to capture into a different brains account, or to reach a self-hosted endpoint your sign-in does not cover. Find it in your brains account settings.";
 
 // Approved endpoint copy, pinned for the same reason and against a specific regression: this text
 // used to promise that /mcp derived from the endpoint, and it would have gone on saying so after
@@ -339,7 +340,7 @@ const CODEX_INSTALL_REGION = [
   "Needs Codex **" + CODEX_MIN_VERSION + "** or newer. Check with:",
   "",
   "```sh",
-  CODEX_CAPABILITY_PROBE,
+  "codex plugin --help",
   "```",
   "",
   "If that errors with an unknown subcommand, run `codex update` first.",
@@ -358,8 +359,18 @@ const CODEX_INSTALL_REGION = [
   "",
   "Restart the ChatGPT desktop app or start a new Codex thread. The first time the",
   "plugin loads, open `/hooks` and trust the bundled brains hooks — that is what",
-  "runs automatic recall and error feedback. Capture and inbox delivery also need a",
-  "capture credential — normally the token below.",
+  "runs automatic recall and error feedback. Capture and inbox delivery use the",
+  "sign-in above as their credential, so there is nothing further to set.",
+  "",
+  // "capture and inbox delivery do not [work there]" was false: the explicit-token
+  // branch is platform independent and captures on Linux exactly as on macOS. The
+  // product decision stands — what changed is that the copy now says which part
+  // is unavailable (the sign-in) rather than claiming the feature is.
+  "Capture and the inbox are **macOS only** for Codex: they read the sign-in from",
+  "the macOS keychain, so on Linux there is none for them to read and they stay",
+  "off. The tools and recall are unaffected. The optional capture token below does",
+  "drive capture there, but Codex on Linux is not a configuration brains supports",
+  "or tests.",
   "",
   "Everyday reading and writing is covered by default. For admin-gated tools or",
   "performance insights, sign in asking for them explicitly (both also need the",
@@ -388,15 +399,18 @@ const CODEX_INSTALL_REGION = [
 // session, and server updates arrive there too.") passed the canary in the body. Editing stays
 // possible; it is now the deliberate two-line diff every other region in this file already demands.
 const CODEX_OPTIONAL_REGION = [
-  "### Optional: conversation capture and the inbox",
+  "### Optional: an explicit capture token",
   "",
-  "The tools above work without this. Capture and the inbox are shell hooks that",
-  "authenticate separately from the MCP server and cannot read the credential Codex",
-  "keeps internally, so they need a brains API token of their own — find it in your",
-  "brains account settings. Without one they simply stay off.",
+  "You do not need this. Capture and the inbox read the credential `codex mcp login",
+  "brains` already stored, so the sign-in above is all they need. To check what has",
+  "been captured, ask brains which chats it has, or run",
+  "`list_pages type=chat_session`.",
+  "",
+  "Set a token to capture into a different brains account, or to reach an endpoint",
+  "your sign-in does not cover — find it in your brains account settings:",
   "",
   "```sh",
-  'export BRAINS_API_TOKEN="<your token>"',
+  "export BRAINS_API_TOKEN=\"<your token>\"",
   "```",
   "",
   "That applies to Codex started from that shell. The macOS desktop app never",
@@ -404,7 +418,7 @@ const CODEX_OPTIONAL_REGION = [
   "restart the app:",
   "",
   "```sh",
-  'launchctl setenv BRAINS_API_TOKEN "<your token>"',
+  "launchctl setenv BRAINS_API_TOKEN \"<your token>\"",
   "```",
   "",
   "This token is only for capture and the inbox. It is **not** how Codex",
@@ -419,12 +433,12 @@ const CODEX_OPTIONAL_REGION = [
 const CLAUDE_INSTALL_REGION = [
   "## Install for Claude Code",
   "",
-  CLAUDE_TOKEN_OPENER,
+  "No token needed — Claude Code signs itself in.",
   "",
   "```sh",
   "claude plugin marketplace add https://github.com/ssvlabs/brains-plugins.git",
   "claude plugin install brains@brains",
-  CLAUDE_MCP_LOGIN,
+  "claude mcp login plugin:brains:brains",
   "```",
   "",
   "If Claude Code does not recognise that login name, run `claude mcp list` and use the name it",
@@ -436,35 +450,37 @@ const CLAUDE_INSTALL_REGION = [
   "Code stores the credential itself, so there is nothing to copy or keep. Confirm with",
   "`claude mcp list`.",
   "",
-  CLAUDE_VERSION_NOTE,
+  "This flow was verified on Claude Code 2.1.220. If `claude mcp login` is not a recognised",
+  "command, update Claude Code.",
   "",
   "Restart Claude Code or start a new session. The first time the plugin loads, trust the bundled",
   "brains hooks — that is what runs automatic recall and error feedback. Capture and inbox delivery",
-  "also need the token below.",
+  "use the sign-in above as their credential, so there is normally nothing further to set. If",
+  "`list_pages type=chat_session` shows nothing after a few turns, set the token below.",
   "",
   "For a local checkout under development:",
   "",
   "```sh",
   "claude plugin marketplace add /absolute/path/to/brains-plugins",
   "claude plugin install brains@brains",
-  CLAUDE_MCP_LOGIN,
+  "claude mcp login plugin:brains:brains",
   "```",
 ].join("\n");
 
 // The Claude token section and the migration section, heading lines included, pinned for the same
 // reason as the Codex one above.
 const CLAUDE_OPTIONAL_REGION = [
-  "### Optional: conversation capture and the inbox",
+  "### Optional: an explicit capture token",
   "",
-  "The tools above work without this. Capture and the inbox are shell hooks that authenticate",
-  "separately from the MCP server and cannot read the credential Claude Code keeps internally, so",
-  "they need a brains API token of their own — find it in your brains account settings. Without one",
-  "they simply stay off.",
+  "You do not need this. Capture and the inbox read the credential `claude mcp login",
+  "plugin:brains:brains` already stored, so the sign-in above is all they need. To check what has",
+  "been captured, ask brains which chats it has, or run `list_pages type=chat_session`.",
   "",
-  "Set it when you install:",
+  "Set a token only to capture into a different brains account, or to reach an endpoint your sign-in",
+  "does not cover — find it in your brains account settings:",
   "",
   "```sh",
-  'claude plugin install brains@brains --config token="<your token>"',
+  "claude plugin install brains@brains --config token=\"<your token>\"",
   "```",
   "",
   "Or change it afterwards with `/plugin` → brains → Configure.",
@@ -769,6 +785,7 @@ const claudeHooksSource = readFileSync(join(PLUGIN, "hooks", "claude-hooks.json"
 const codexHooksSource = readFileSync(join(PLUGIN, "hooks", "hooks.json"), "utf8");
 const turnHook = readFileSync(join(PLUGIN, "hooks", "brains-turn.sh"), "utf8");
 const inboxHook = readFileSync(join(PLUGIN, "hooks", "lib", "brains-inbox.sh"), "utf8");
+const credLib = readFileSync(join(PLUGIN, "hooks", "lib", "brains-credential.sh"), "utf8");
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 const core = readFileSync(join(PLUGIN, "core.md"), "utf8");
 const writeSkill = readFileSync(join(PLUGIN, "skills", "brains-write", "SKILL.md"), "utf8");
@@ -1280,7 +1297,7 @@ if (!claudeOnPath) {
   }
 }
 
-assert(core.includes("<!-- brains:core:start v=6 -->"), "core marker must be v6");
+assert(core.includes("<!-- brains:core:start v=7 -->"), "core marker must be v7");
 for (const signal of [
   "Query brains reflexively",
   "list_calendar_events",
@@ -1300,12 +1317,18 @@ for (const signal of [
   // how "Capture is automatic … You do not need to call save_chat_session" survived here
   // while being false in two shipped configurations at once:
   //   1. no hooks at all — claude.ai web, on either install path;
-  //   2. hooks present but capture unconfigured — brains-turn.sh:43 exits early with no token,
-  //      and that token is `required: false`. brains-start.sh:27 cats core.md with NO token
-  //      check, so precisely those users are the ones who read the claim.
-  // Both axes get a signal: a rewrite dropping either one re-promises capture to a real user
-  // who is not getting it.
-  "only where a capture credential resolves",
+  //   2. hooks present but no credential — which used to be the silent case.
+  // Axis 2 changed shape rather than going away. The credential now comes from the client's own
+  // MCP sign-in, so it resolves for anyone whose brains tools work at all; and when it does not,
+  // the session-start hook says so in a `brains:capture` note. So the pinned signal moved from
+  // "assume nothing" to "the note is the answer when there is one" — and the un-promise stays,
+  // because with no note the model still cannot tell.
+  // The note is authoritative AND the agent must not invent a step. Two of the
+  // four states name a SETTING to change rather than a command to run, so an
+  // agent told to "run the command it names" when none is named can fabricate
+  // one — `claude mcp remove brains` — and execute a mutation on a real machine.
+  "is authoritative",
+  "never a command it did not name",
   "never promise capture and never deny it",
   "where the hooks don't run",
   // And the prohibition must stay NARROW. A blanket "do not call save_chat_session" suppressed
@@ -1329,11 +1352,14 @@ for (const signal of [
 // user. Verbatim pinning costs nothing here: editing core.md is already a deliberate act because it
 // forces the `v=` marker bump and both suites' marker assertions.
 const CORE_CAPTURE_REGION = [
-  "**Capture.** In Codex and Claude Code the ingest hook saves each turn, but only",
-  "where a capture credential resolves — so never promise capture and never deny",
-  "it; `list_pages type=chat_session` is the only way to know. Don't call",
-  "`save_chat_session` routinely there; do call it when asked, and where the hooks",
-  "don't run (claude.ai web) it is the only path.",
+  "**Capture.** In Codex and Claude Code the ingest hook saves each turn, using the",
+  "same sign-in that authenticates these tools. A `brains:capture` note means it is",
+  "OFF and is authoritative: surface it once and, if the user agrees, do exactly the",
+  "one step it names — a command or a setting — never a command it did not name.",
+  "Without a note, never promise capture and never deny it; `list_pages",
+  "type=chat_session` is the only confirmation. Don't call `save_chat_session`",
+  "routinely there; do call it when asked, and where the hooks don't run (claude.ai",
+  "web) it is the only path.",
 ].join("\n");
 // And the WHOLE injected body, verbatim, with the capture paragraph above composed into it rather
 // than pinned twice. brains-start.sh cats this file — all of it, not the capture paragraph — into
@@ -1349,7 +1375,7 @@ const CORE_CAPTURE_REGION = [
 // markers: text above the start marker or below the end marker is injected just the same. The marker
 // line is inside the pin, so the v= bump both suites assert stays part of the same edit.
 const CORE_BODY = [
-  "<!-- brains:core:start v=6 -->",
+  "<!-- brains:core:start v=7 -->",
   "# brains — your memory layer",
   "",
   "You have a memory layer called **brains** (the `brains` MCP server). It holds the",
@@ -1373,7 +1399,14 @@ const CORE_BODY = [
   "page update time is not event time. Name the source page's `title` and `type`,",
   "and never invent slugs or IDs.",
   "",
-  CORE_CAPTURE_REGION,
+  "**Capture.** In Codex and Claude Code the ingest hook saves each turn, using the",
+  "same sign-in that authenticates these tools. A `brains:capture` note means it is",
+  "OFF and is authoritative: surface it once and, if the user agrees, do exactly the",
+  "one step it names — a command or a setting — never a command it did not name.",
+  "Without a note, never promise capture and never deny it; `list_pages",
+  "type=chat_session` is the only confirmation. Don't call `save_chat_session`",
+  "routinely there; do call it when asked, and where the hooks don't run (claude.ai",
+  "web) it is the only path.",
   "",
   "**The skills carry the detail** — load the one that fits the moment:",
   "`brains-read` (querying memory), `brains-write` (sending/creating via",
@@ -2282,25 +2315,214 @@ assert(
   "README must be exactly the approved regions, in order, with nothing between them — every byte this file publishes belongs to one constant here, so text added at a seam or in a section no pin covers fails right here",
 );
 
-assert(
-  turnHook.includes('CLIENT="claude"'),
-  "shared turn hook must default Claude Code captures to the Claude CLI",
-);
-assert(
-  turnHook.includes('[ -n "${PLUGIN_ROOT:-}" ] && CLIENT="codex"'),
-  "shared turn hook must identify the Codex plugin runtime as the Codex CLI",
-);
+// WHY CODE-ONLY REGIONS, not substrings — the same lesson as the skill artifacts
+// above, learned again on this file's own assertions.
+//
+// These pins were `credLib.includes("ambiguous")` and friends. A substring
+// match over a shell file is satisfied by a COMMENT, and three of them already
+// were: gutting every non-comment line that mentioned "ambiguous" left the
+// assertion "resolver must refuse when more than one distinct candidate
+// matches" passing, carried entirely by the prose above it. The two "must
+// source the shared credential resolver" pins were being carried by a
+// `# shellcheck source=` directive — so the guard against the two hooks
+// re-growing separate credential chains, which is the whole reason this task
+// exists, asserted nothing.
+//
+// codeOnly() strips comments and blank lines before matching, so a comment
+// CANNOT satisfy one of these by construction. That is the property, not a
+// stricter string.
+const codeOnly = (text: string): string =>
+  text.split("\n").filter((l) => l.trim() !== "" && !/^\s*#/.test(l)).join("\n");
+
+const TURN_CLIENT_DETECTION_REGION = [
+  "CLIENT=\"claude\"",
+  "[ -n \"${PLUGIN_ROOT:-}\" ] && CLIENT=\"codex\"",
+].join("\n");
+
+const TURN_SOURCES_RESOLVER_REGION = [
+  "[ -r \"$CRED_LIB\" ] || exit 0",
+  ". \"$CRED_LIB\" || exit 0",
+].join("\n");
+
+const INBOX_SOURCES_RESOLVER_REGION = [
+  "[ -r \"$CRED_LIB\" ] || exit 0",
+  ". \"$CRED_LIB\" || exit 0",
+].join("\n");
+
+// Three things this region has to hold at once, and each of them was a defect
+// before it was a pin. The separator is hoisted and the fork-free predicate is
+// tested first, because two command substitutions per entry cost seconds on a
+// store the document ceiling now admits. The loop consults the total budget, so
+// the ceiling cannot make it unbounded. And a non-matching row may only discard
+// a record file PRIVATE to it — keyed on shared-ness, not on the client, since
+// the client check let the array backend delete the snapshot every row shares.
+const RESOLVER_SELECTION_REGION = [
+  "  tab=$(printf '\\t')",
+  "  while IFS=\"$tab\" read -r key url name recfile; do",
+  "    [ -n \"$key\" ] || continue",
+  "    BRAINS_CRED_SAW_ENTRIES=1",
+  "    if ! _brains_budget_left; then",
+  "      BRAINS_CRED_TRUNCATED=1",
+  "      [ \"$recfile\" != \"${store:-}\" ] && _brains_discard \"$recfile\"",
+  "      continue",
+  "    fi",
+  "    if ! _brains_is_brains_server \"$name\" ||",
+  "       ! corigin=$(brains_origin \"$url\") ||",
+  "       [ \"$corigin\" != \"$want\" ]; then",
+  "      [ \"$recfile\" != \"${store:-}\" ] && _brains_discard \"$recfile\"",
+  "      continue",
+  "    fi",
+  "    matched=\"$matched$key",
+  "\"",
+  "    matchedfiles=\"$matchedfiles$recfile",
+  "\"",
+  "    count=$((count + 1))",
+  "  done <<EOF2",
+  "$meta",
+  "EOF2",
+].join("\n");
+
+const RESOLVER_DECISION_REGION = [
+  "  if [ \"$BRAINS_CRED_TRUNCATED\" = \"1\" ]; then",
+  "    BRAINS_CRED_STATE=\"indeterminate\"",
+  "    _brains_discard \"${store:-}\"; _brains_discard_matched",
+  "    return 1",
+  "  fi",
+  "  if [ \"$count\" -eq 0 ]; then",
+  "    if [ \"$BRAINS_CRED_SAW_ENTRIES\" = \"1\" ]; then",
+  "      BRAINS_CRED_STATE=\"blocked\"",
+  "    else",
+  "      BRAINS_CRED_STATE=\"no-credential\"",
+  "    fi",
+  "    _brains_discard \"${store:-}\"; _brains_discard_matched",
+  "    return 1",
+  "  fi",
+  "  if [ \"$count\" -gt 1 ]; then",
+  "    BRAINS_CRED_STATE=\"indeterminate\"",
+  "    _brains_discard \"${store:-}\"; _brains_discard_matched",
+  "    return 1",
+  "  fi",
+  "  key=\"${matched%%",
+].join("\n");
+
+const RESOLVER_TRANSPORT_TRUTH_REGION = [
+  "  crc=$?",
+  "  code=\"${resp##*$'\\n'}\"",
+  "  body=\"${resp%$'\\n'*}\"",
+  "  if [ \"$crc\" -ne 0 ]; then",
+  "    BRAINS_HTTP_CODE=\"$code\"",
+  "    brains_health_apply \"$cap\" \"$url\" \"$gen\" \"unreachable\"",
+  "    return 1",
+  "  fi",
+].join("\n");
+
+const RESOLVER_CLAUDE_SERVICE_REGION = [
+  "_brains_claude_service() {",
+  "  local dir hash",
+  "  if [ -n \"${CLAUDE_SECURESTORAGE_CONFIG_DIR+set}\" ]; then",
+  "    dir=\"$CLAUDE_SECURESTORAGE_CONFIG_DIR\"",
+  "  elif [ -n \"${CLAUDE_CONFIG_DIR:-}\" ]; then",
+  "    dir=\"$CLAUDE_CONFIG_DIR\"",
+  "  else",
+  "    dir=\"\"",
+  "  fi",
+  "  if [ -z \"$dir\" ]; then",
+  "    printf '%s' 'Claude Code-credentials'",
+  "    return 0",
+  "  fi",
+  "  hash=$(printf '%s' \"$dir\" | shasum -a 256 2>/dev/null | cut -c1-8)",
+  "  [ -n \"$hash\" ] || return 1",
+  "  printf 'Claude Code-credentials-%s' \"$hash\"",
+  "}",
+].join("\n");
+
+const assertRegion = (source: string, region: string, message: string): void =>
+  assert(codeOnly(source).includes(region), message);
+
+// Client detection: which CLI a capture is attributed to. Codex defines
+// PLUGIN_ROOT; Claude Code invokes the explicit hook map without it.
+assertRegion(turnHook, TURN_CLIENT_DETECTION_REGION,
+  "turn hook must detect the client exactly as approved — Claude by default, Codex when the plugin runtime sets PLUGIN_ROOT");
 assert(
   turnHook.includes('client:$client, client_type:"cli"'),
   "turn ingest payload must include the detected client and CLI type",
 );
+
+// ONE resolver, sourced by BOTH hooks. They had drifted: the turn hook
+// scavenged a Codex MCP header and the inbox engine did not, so a Codex user
+// with header auth had capture ON and the inbox OFF. A second private chain
+// re-appearing in either hook is the regression, and it cannot be caught by
+// looking at only one of them.
+assertRegion(turnHook, TURN_SOURCES_RESOLVER_REGION,
+  "turn hook must source the shared credential resolver, not build its own chain");
+assertRegion(inboxHook, INBOX_SOURCES_RESOLVER_REGION,
+  "inbox engine must source the shared credential resolver, not build its own chain");
+for (const [name, hook] of [["turn hook", turnHook], ["inbox engine", inboxHook]] as const) {
+  assert(
+    !/Authorization: Bearer/.test(hook),
+    `${name} must not attach an Authorization header itself — brains_request owns the credential, so no other code can send it to an unchecked host`,
+  );
+}
+
+// Selection: by canonical ORIGIN *and* server identity, never by name alone.
+// This machine's Codex store holds three entries all named "brains" — two dead
+// localhost stubs and one STAGE — so a name match picks arbitrarily between a
+// token for a dead server and a stage token pointed at production.
+assertRegion(credLib, RESOLVER_SELECTION_REGION,
+  "resolver must select stored credentials by canonical origin AND brains server identity");
+
+// The refusal. Neither store records WHICH ACCOUNT a token belongs to, so two
+// candidates for one origin cannot be told apart; capturing into the wrong
+// brain is worse than a 401, because a 401 is detectable. An incomplete scan is
+// the same answer for the same reason — it might have found a second one.
+assertRegion(credLib, RESOLVER_DECISION_REGION,
+  "resolver must refuse when more than one distinct candidate matches, or when the scan was incomplete, rather than guess");
+
+// Transport truth. curl writes %{http_code} as soon as headers arrive, so a
+// transfer that dies mid-body still reports 200 — and the truncated body can be
+// valid JSON that parses. Measured: curl_exit=18, http_code=200, body
+// {"device_id":"d1"}. Only the exit status separates them.
+assertRegion(credLib, RESOLVER_TRANSPORT_TRUTH_REGION,
+  "brains_request must treat any non-zero curl exit as a transport failure regardless of HTTP code");
+
+// The Claude store's service name is a factual contract with Claude Code, and
+// the suffix rule for a non-default config dir is what keeps one profile from
+// reading another's credential. Neither is exercised by the fixture-file path
+// the credential suite uses, so it is pinned as authored code here.
+assertRegion(credLib, RESOLVER_CLAUDE_SERVICE_REGION,
+  "resolver must derive the Claude Code credential service exactly as the client does, and probe no alternative");
+
+// And a guard against this class regrowing. A POSITIVE substring match over a
+// shell file is satisfiable by a comment, which is how three pins here came to
+// assert nothing; the fix is codeOnly()/assertRegion(), and this makes reaching
+// for the weaker form fail loudly instead of merging quietly. Negative matches
+// are exempt: a comment containing the banned text FAILS them, so they are
+// over-strict rather than vacuous — the opposite failure mode.
+{
+  const selfSource = readFileSync(join(ROOT, "tests", "plugin-contract", "run.ts"), "utf8");
+  const APPROVED_POSITIVE_SUBSTRING_PINS = [
+    // Held by code — the string appears in no comment, and gutting it fails the
+    // assertion. Verified by mutation.
+    `turnHook.includes('client:$client, client_type:"cli"')`,
+  ];
+  const offenders = selfSource
+    .split("\n")
+    .map((line, i) => ({ line: line.trim(), n: i + 1 }))
+    .filter(({ line }) => /^(credLib|turnHook|inboxHook|hook)\.includes\(/.test(line))
+    .filter(({ line }) => !APPROVED_POSITIVE_SUBSTRING_PINS.some((ok) => line.startsWith(ok)));
+  assert(
+    offenders.length === 0,
+    `positive substring pins over shipped shell source are satisfiable by a comment — use assertRegion() with a codeOnly region instead, or add a mutation-proved exception to APPROVED_POSITIVE_SUBSTRING_PINS: ${offenders.map((o) => `:${o.n} ${o.line}`).join("; ")}`,
+  );
+}
+
+// A universal -o /dev/null would have silently killed device-id caching, drift
+// nudges and the whole inbox delivery path while every status-code assertion
+// stayed green. Negative pins cannot be satisfied by a comment — a comment
+// containing the banned text FAILS them — so these stay as substring bans.
 assert(
-  turnHook.includes("codex mcp get brains --json"),
-  "Codex turn capture must reuse persisted MCP authentication when no token env is present",
-);
-assert(
-  turnHook.includes(".transport.http_headers.Authorization"),
-  "Codex turn capture must read the configured MCP Authorization header",
+  !credLib.includes("-o /dev/null"),
+  "brains_request must preserve response bodies — the device report and inbox GET are parsed from them",
 );
 
 // Exercise the standalone Codex path without a token env. The fake `codex`
@@ -2312,13 +2534,19 @@ try {
   const bin = join(temp, "bin");
   const capture = join(temp, "payloads.jsonl");
   mkdirSync(bin);
+  // The fake `codex` now reports the transport URL as well as the header, because the real one
+  // does and because the resolver binds a discovered credential to that URL's origin. A header
+  // whose audience is unknown is not usable: without this field the token could be sent to a host
+  // that never issued it, which is exactly what the binding exists to prevent.
   writeFileSync(
     join(bin, "codex"),
-    '#!/bin/sh\nprintf \'%s\\n\' \'{"transport":{"http_headers":{"Authorization":"Bearer configured-token"}}}\'\n',
+    '#!/bin/sh\nprintf \'%s\\n\' \'{"transport":{"url":"' + CLAUDE_MCP_URL + '","http_headers":{"Authorization":"Bearer configured-token"}}}\'\n',
   );
+  // Emits a status line last, the way `-w \'\\n%{http_code}\'` makes real curl behave, so the
+  // wrapper's parse is exercised rather than bypassed.
   writeFileSync(
     join(bin, "curl"),
-    '#!/bin/sh\n[ "${SLOW_CAPTURE:-}" = "1" ] && sleep 0.2\nprev=""\nfor arg in "$@"; do\n  if [ "$prev" = "-d" ]; then printf \'%s\\n\' "$arg" >> "$CAPTURE_FILE"; fi\n  case "$arg" in\n    http://*|https://*) [ -n "${URL_FILE:-}" ] && printf \'%s\\n\' "$arg" >> "$URL_FILE" ;;\n  esac\n  prev="$arg"\ndone\n',
+    '#!/bin/sh\n[ "${SLOW_CAPTURE:-}" = "1" ] && sleep 0.2\nprev=""\nfor arg in "$@"; do\n  if [ "$prev" = "-d" ]; then printf \'%s\\n\' "$arg" >> "$CAPTURE_FILE"; fi\n  case "$arg" in\n    http://*|https://*) [ -n "${URL_FILE:-}" ] && printf \'%s\\n\' "$arg" >> "$URL_FILE" ;;\n  esac\n  prev="$arg"\ndone\nprintf \'%s\\n%s\' "${FAKE_BODY:-}" "${FAKE_CODE:-200}"\n',
   );
   chmodSync(join(bin, "codex"), 0o755);
   chmodSync(join(bin, "curl"), 0o755);
@@ -2340,6 +2568,8 @@ try {
       CLAUDE_PLUGIN_OPTION_TOKEN: "",
       BRAINS_API_TOKEN: "",
       BRAINS_INBOX_TOKEN: "",
+      // Hermetic: never let a real developer credential resolve in a test.
+      BRAINS_CREDENTIAL_STORE_DISABLED: "1",
       BRAINS_STATE_DIR: join(temp, "state-core"),
     },
   });
@@ -2358,6 +2588,11 @@ try {
       BRAINS_API_TOKEN: "",
       BRAINS_INBOX_TOKEN: "",
       CLAUDE_PLUGIN_OPTION_TOKEN: "",
+      // Hermetic without disabling discovery: these two scenarios EXERCISE the header
+      // scavenge, so the blanket switch would make them vacuous. Pointing the store reads at a
+      // path that does not exist keeps a real developer keychain out of them just as firmly.
+      BRAINS_CLAUDE_CREDENTIALS_FILE: join(temp, "no-such-store.json"),
+      BRAINS_CODEX_CREDENTIALS_FILE: join(temp, "no-such-store.json"),
       BRAINS_STATE_DIR: join(temp, "state"),
       CAPTURE_FILE: capture,
     },
@@ -2389,6 +2624,11 @@ try {
       BRAINS_API_TOKEN: "",
       BRAINS_INBOX_TOKEN: "",
       CLAUDE_PLUGIN_OPTION_TOKEN: "",
+      // Hermetic without disabling discovery: these two scenarios EXERCISE the header
+      // scavenge, so the blanket switch would make them vacuous. Pointing the store reads at a
+      // path that does not exist keeps a real developer keychain out of them just as firmly.
+      BRAINS_CLAUDE_CREDENTIALS_FILE: join(temp, "no-such-store.json"),
+      BRAINS_CODEX_CREDENTIALS_FILE: join(temp, "no-such-store.json"),
       BRAINS_STATE_DIR: join(temp, "state"),
       CAPTURE_FILE: assistantCapture,
       SLOW_CAPTURE: "1",
@@ -2421,6 +2661,8 @@ try {
     BRAINS_API_TOKEN: "",
     BRAINS_INBOX_TOKEN: "",
     CLAUDE_PLUGIN_OPTION_TOKEN: "",
+    // Hermetic: never let a real developer credential resolve in a test.
+    BRAINS_CREDENTIAL_STORE_DISABLED: "1",
     BRAINS_STATE_DIR: join(temp, "state-no-token"),
     CAPTURE_FILE: noTokenCapture,
   };
@@ -2429,10 +2671,20 @@ try {
     env: noTokenEnv,
   });
   assert(turnNoToken.status === 0, "turn hook must exit 0 with no token available");
+  // "No capture" is no longer the same as "no output". The `now:` line is not capture — it tells
+  // the model what time it is — and it used to sit BEHIND the credential gate, so a user without a
+  // token silently lost accurate time injection as collateral damage. It now runs ahead of the
+  // gate, and the thing this asserts is what actually matters: nothing is sent and nothing errors.
   assert(
-    turnNoToken.stdout.toString() === "" && turnNoToken.stderr.toString() === "",
-    "turn hook must stay silent with no token available",
+    turnNoToken.stderr.toString() === "",
+    "turn hook must not write to stderr with no credential available",
   );
+  for (const line of turnNoToken.stdout.toString().split("\n").filter((l) => l.trim() !== "")) {
+    assert(
+      /^<!-- brains:now -->/.test(line),
+      `turn hook must emit nothing but the time line with no credential available, got: ${line}`,
+    );
+  }
   assert(!existsSync(noTokenCapture), "turn hook must not POST anything with no token available");
 
   const inboxNoToken = spawnSync(
@@ -2442,8 +2694,66 @@ try {
   );
   assert(inboxNoToken.status === 0, "inbox engine must exit 0 with no token available");
   assert(
-    inboxNoToken.stdout.toString() === "" && inboxNoToken.stderr.toString() === "",
-    "inbox engine must stay silent with no token available",
+    inboxNoToken.stderr.toString() === "",
+    "inbox engine must not write to stderr with no credential available",
+  );
+  // Session start is the one place a tokenless user is told, and it must say so exactly once.
+  // Before this the state was completely unobservable: no request, no log line, no error, for
+  // eleven days on the machine that reported it.
+  const firstSignal = inboxNoToken.stdout.toString();
+  assert(
+    firstSignal.includes("<!-- brains:capture -->"),
+    "inbox engine must announce the off-state once at session start",
+  );
+  // The remedy is PER PLATFORM, so the assertion has to be too. Codex reads its
+  // sign-in from the macOS keychain and Codex on Linux is not supported, so
+  // there the note must say so and name nothing — an assertion that accepted
+  // any string, or that only ever looked for "mcp login", would pass on the
+  // wrong text for one of the two platforms.
+  const codexKeychainHere = spawnSync("sh", ["-c", "command -v security"], {
+    env: noTokenEnv,
+  }).status === 0;
+  if (codexKeychainHere) {
+    assert(
+      firstSignal.includes("codex mcp login brains"),
+      "on a host with the macOS keychain the Codex off-state must name the sign-in that fixes it",
+    );
+    assert(
+      !/not support/i.test(firstSignal),
+      "…and must not claim the platform is unsupported",
+    );
+  } else {
+    assert(
+      /reads the Codex sign-in from the macOS keychain/.test(firstSignal) &&
+        /not a configuration brains supports/.test(firstSignal),
+      "without the macOS keychain the Codex off-state must say why the sign-in cannot be read",
+    );
+    assert(
+      !/mcp login/.test(firstSignal),
+      "…and must name no sign-in step, because there is none to read on this platform",
+    );
+    // It must not say there is nothing to change, either. BRAINS_API_TOKEN
+    // resolves and captures here — the branch is platform independent — so the
+    // old wording was false in a note core.md tells the agent is authoritative.
+    assert(
+      !/nothing to change/.test(firstSignal),
+      "…and must not claim nothing would change it, which is measurably false",
+    );
+    // No action, so no offer protocol: a note that says there is nothing to do
+    // and then tells the agent to offer it leaves the agent to invent one.
+    assert(
+      !/Offer this to the user/.test(firstSignal) && /nothing for you to offer/.test(firstSignal),
+      "…and a note with no action must not carry the offer tail",
+    );
+  }
+  const secondSignal = spawnSync(
+    "bash",
+    [join(PLUGIN, "hooks", "lib", "brains-inbox.sh"), "startup", "codex-session-2"],
+    { env: noTokenEnv },
+  );
+  assert(
+    !secondSignal.stdout.toString().includes("<!-- brains:capture -->"),
+    "the off-state signal must be claimed once per episode, not repeated every session",
   );
 
   // The MCP URL is a literal now, so `userConfig.endpoint` governs capture and the inbox and
@@ -2465,6 +2775,8 @@ try {
       CLAUDE_PLUGIN_OPTION_ENDPOINT: CLAUDE_SELF_HOSTED,
       BRAINS_API_TOKEN: "",
       BRAINS_INBOX_TOKEN: "",
+      // Hermetic: never let a real developer credential resolve in a test.
+      BRAINS_CREDENTIAL_STORE_DISABLED: "1",
       BRAINS_STATE_DIR: join(temp, "state-endpoint"),
       CAPTURE_FILE: endpointCapture,
       URL_FILE: endpointUrls,
@@ -2515,6 +2827,8 @@ try {
       CLAUDE_PLUGIN_OPTION_TOKEN: "endpoint-probe-token",
       BRAINS_API_TOKEN: "",
       BRAINS_INBOX_TOKEN: "",
+      // Hermetic: never let a real developer credential resolve in a test.
+      BRAINS_CREDENTIAL_STORE_DISABLED: "1",
       BRAINS_STATE_DIR: join(temp, "state-default"),
       CAPTURE_FILE: defaultCapture,
       URL_FILE: defaultUrls,
@@ -2549,6 +2863,8 @@ try {
       BRAINS_ENDPOINT: HOOK_ENV_ENDPOINT,
       BRAINS_API_TOKEN: "",
       BRAINS_INBOX_TOKEN: "",
+      // Hermetic: never let a real developer credential resolve in a test.
+      BRAINS_CREDENTIAL_STORE_DISABLED: "1",
       BRAINS_STATE_DIR: join(temp, "state-env"),
       CAPTURE_FILE: envCapture,
       URL_FILE: envUrls,
