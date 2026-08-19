@@ -42,13 +42,13 @@ the flow looks live forever.
 
 ## Hard rules
 
-- **Do not re-call `create_automation_flow` in this conversation.** Once you have this playbook in context, refer to the copy you already have — re-fetching it wastes tokens, resets your state in the user's eyes, and produces a worse experience. The flow is one playbook per session, not one per step. The one exception: if the user asks to pick a flow back up and you no longer have its procedure in front of you, reload it once — then continue from the last checkpoint rather than starting over. Never re-fetch one you can still see.
+- **Do not re-call `create_agent_flow` in this conversation.** Once you have this playbook in context, refer to the copy you already have — re-fetching it wastes tokens, resets your state in the user's eyes, and produces a worse experience. The flow is one playbook per session, not one per step. The one exception: if the user asks to pick a flow back up and you no longer have its procedure in front of you, reload it once — then continue from the last checkpoint rather than starting over. Never re-fetch one you can still see.
 - **One question per turn.** Never ask multiple questions in a single message.
 - **Propose, don't interrogate.** After Steps 1–4 you draft the full source from a template (see Skeletons below) and show it for review. Don't ask "what tool grants?" or "how should it dedupe?" — that's your job once you know the trigger and write target.
 - **The dedupe-key question is mandatory at Step 4.** If the agent appends to a shared collection (`board.updates`, page timeline, etc.) you MUST ask for or infer the dedupe key (`postId` = page slug for emails, `event_id` for calendar events, etc.) and the skeleton MUST include a "skip if already present" check. Do not draft source without it.
-- **`http_fetch` is a high-risk grant; explicit user approval is mandatory at Step 5.5.** Granting `http_fetch` lets the agent send any data the script reads from the brain (emails, board rows, calendar, search results) to any host on the runtime allowlist. The Deno sandbox does NOT block exfiltration — the egress happens from the MCP server in the stage VPC, not from the sandbox, so the host allowlist is the only gate. If `http_fetch` ends up in the proposed grants, you MUST run Step 5.5 verbatim and wait for an explicit "yes" before `save_automation_draft`. Do not soften the wording, do not batch it with other approvals, do not skip it because the hosts "look fine" to you.
+- **`http_fetch` is a high-risk grant; explicit user approval is mandatory at Step 5.5.** Granting `http_fetch` lets the agent send any data the script reads from the brain (emails, board rows, calendar, search results) to any host on the runtime allowlist. The Deno sandbox does NOT block exfiltration — the egress happens from the MCP server in the stage VPC, not from the sandbox, so the host allowlist is the only gate. If `http_fetch` ends up in the proposed grants, you MUST run Step 5.5 verbatim and wait for an explicit "yes" before `save_agent_draft`. Do not soften the wording, do not batch it with other approvals, do not skip it because the hosts "look fine" to you.
 - **Never ask the user to paste a secret value into the conversation.** If the source references `{{secret_name}}`, run Step 5.7: names in chat, values in the vault. A missing value never blocks the flow — save + smoke test proceed and fail cleanly until the user stores it.
-- **Use the same MCP namespace that returned this playbook.** If you called this as `mcp__brains__create_automation_flow`, every downstream call (`save_automation_draft`, `get_board`, `search`, etc.) uses `mcp__brains__*`. If you called it under a different namespace, use that one throughout. **Don't mix namespaces.**
+- **Use the same MCP namespace that returned this playbook.** If you called this as `mcp__brains__create_automation_flow`, every downstream call (`save_agent_draft`, `get_board`, `search`, etc.) uses `mcp__brains__*`. If you called it under a different namespace, use that one throughout. **Don't mix namespaces.**
 - **Narrate one short line between steps** so the user knows what just happened and what's next.
 
 ## The sandbox authoring contract — read this BEFORE drafting source
@@ -70,16 +70,16 @@ This is the **complete** surface a sandboxed automation can call. Do NOT guess a
 
 **Other sandbox capabilities:**
 - **Per-automation K/V** (cursors, watermarks, last-seen ids): `brains.kv.get(k)` / `set(k,v)` / `list()` / `delete(k)`. **No grant needed** — it's auto-scoped to this automation.
-- **Secrets vault:** reference `{{secret_name}}` inside `http` `url`/`headers`/`query` values — the MCP server substitutes the decrypted value before egress. `brains.call("automation_secret_list")` reads the key names (never values). Grant `automation_secret_list` to enumerate keys; the substitution itself rides on the `http_fetch` grant. Keys are set out-of-band, and the sandbox cannot write secrets, only reference them. During authoring you work with secret NAMES only — **never solicit the value in chat**; run Step 5.7 for the name-confirm / existence-check / missing-value handling.
-- **LLM from the sandbox:** `brains.llm({...})` (grant `automation_complete`). **If you feed it bytes fetched from outside brains** (`brains.http`, a third-party API), wrap them first with `brains.wrapUntrusted(text)` / `brains.untrustedClause()` — the prompt-injection guard. Any flow that grants both `http_fetch` and `automation_complete` must do this.
+- **Secrets vault:** reference `{{secret_name}}` inside `http` `url`/`headers`/`query` values — the MCP server substitutes the decrypted value before egress. `brains.call("agent_secret_list")` reads the key names (never values). Grant `agent_secret_list` to enumerate keys; the substitution itself rides on the `http_fetch` grant. Keys are set out-of-band, and the sandbox cannot write secrets, only reference them. During authoring you work with secret NAMES only — **never solicit the value in chat**; run Step 5.7 for the name-confirm / existence-check / missing-value handling.
+- **LLM from the sandbox:** `brains.llm({...})` (grant `agent_complete`). **If you feed it bytes fetched from outside brains** (`brains.http`, a third-party API), wrap them first with `brains.wrapUntrusted(text)` / `brains.untrustedClause()` — the prompt-injection guard. Any flow that grants both `http_fetch` and `agent_complete` must do this.
 - **Owner identity / timezone:** `brains.whoami()` (grant `whoami`) — the supported way to get the owner's tz, which you need whenever a cron is expressed in local time. `brains.user` / `brains.profile` are injected directly (no grant, no call).
-- **Self-diagnosis:** `brains.automation_recent_failures({limit?})` (grant `automation_recent_failures`) — this automation's recent failed runs.
+- **Self-diagnosis:** `brains.agent_recent_failures({limit?})` (grant `agent_recent_failures`) — this automation's recent failed runs.
 - **Outbound HTTP:** `brains.http({url, method?, headers?, query?, timeout_ms?})` (grant `http_fetch` — see Step 5.5; egress is host-pinned). **Request body — name the field explicitly, never leave it implied:** `body_json` (any JSON value; sends it as JSON and sets Content-Type for you), `body_text` (a string, sent verbatim — set your own Content-Type), or `body` (fetch-style alias: a string goes verbatim, anything else is serialized as JSON). Precedence is `body_json`, then `body_text`, then `body`. **Binary must be base64-encoded into a string first** — a `Uint8Array`/`Blob`/`FormData`/`URLSearchParams` cannot cross to the server and is rejected. `GET`/`DELETE` never send a body. Note `{{secret}}` substitution does **not** apply to the body (url/headers/query only), so a body cannot reference the vault. Max request body 200 KB.
 - **Escape hatch:** `brains.call("<any_mcp_tool>", {...})` invokes any granted MCP tool by bare name. This is how `adapter_query` (and any tool with no dedicated helper) is reached. It is **still grant-gated** — the bare tool name must be in `tool_grants`.
 
 **Grant rule (load-bearing):** every tool the source calls must be listed in `tool_grants` by its **bare MCP tool name** (`get_page`, `adapter_query`, `act_on_integration`, …). A missing grant fails at runtime with `tool "X" not in automation grants`. The **only** exception is the `automation_state_*` family (no grant required). Reaching a tool through `brains.call(...)` does **not** bypass the allowlist.
 
-**Bad grants are refused at SAVE time, not at runtime.** `save_automation_draft` / `update_automation` reject the whole call if a grant is an unknown tool name (typo), is bot-only, requires admin, or requires a human-only account capability — the error names the offending grant. So a typo'd grant costs you a rejected save, not a mysterious failed run. Note `get_insights` is admin-only and `get_perf_insights` requires a human performance entitlement; neither can **ever** be granted to an automation.
+**Bad grants are refused at SAVE time, not at runtime.** `save_agent_draft` / `update_agent` reject the whole call if a grant is an unknown tool name (typo), is bot-only, requires admin, or requires a human-only account capability — the error names the offending grant. So a typo'd grant costs you a rejected save, not a mysterious failed run. Note `get_insights` is admin-only and `get_perf_insights` requires a human performance entitlement; neither can **ever** be granted to an automation.
 
 ## Step 1 — Purpose
 
@@ -180,15 +180,15 @@ Automation tokens cannot self-confirm: `confirm_action` is refused for them unde
 
 **For "notify me" / "ping me" / "DM me" asks**, default to `telegram_push` when the user has Telegram connected — it's the user's primary notification surface. Reach for `act_on_integration` only when the notification belongs in a specific channel (email thread, calendar invite, Drive doc). `telegram_push` bypasses the draft/confirm step and sends immediately, so the user must have opted in by connecting the bot.
 
-Before adding `telegram_push` to the plan, **verify the user has a Telegram bot set up**. Call `list_integrations` and check the row where `name === "telegram"`. If `connected` is false (or no such row exists), stop here and tell the user verbatim:
+Before adding `telegram_push`, **verify the user has a Telegram bot set up**. Call `list_integrations` and check the row where `name === "telegram"`. If `connected` is false (or no such row exists), stop here and tell the user verbatim:
 
 > *"You don't have a Telegram bot wired up yet. Go to `/integrations/telegram`, register one with @BotFather, paste the token, then DM the claim code your new bot shows in the dashboard. Once that's done, come back and I'll finish this agent."*
 
-Do NOT proceed past this point until the user confirms the bot is set up. **Never ask the user to paste a Telegram bot token as a secret** — the integration owns the token, the agent runtime never sees it. If the LLM is about to suggest `automation_secret_set` with a Telegram-shaped key, stop and use `telegram_push` instead.
+Do NOT proceed past this point until the user confirms the bot is set up. **Never ask the user to paste a Telegram bot token as a secret** — the integration owns the token, the agent runtime never sees it. If the LLM is about to suggest `agent_secret_set` with a Telegram-shaped key, stop and use `telegram_push` instead.
 
 ## Step 4.5 — Conflict check (mandatory if writing to a board)
 
-Before drafting source, call **`find_overlapping_automations`** with the board ids the user just chose plus `dedupe_target_field` (e.g. `"updates"`) and `trigger_kind`. The tool returns every existing agent across all users whose `writes_to_boards` overlap.
+Before drafting source, call **`find_overlapping_agents`** with the board ids the user just chose plus `dedupe_target_field` (e.g. `"updates"`) and `trigger_kind`. The tool returns every existing agent across all users whose `writes_to_boards` overlap.
 
 **If `count === 0`**, narrate one short line and continue:
 > *"Nothing else writes to that board — clear runway."*
@@ -227,7 +227,7 @@ If the user gave only vague approval ("yeah just save it"), ask once more — ve
 
 Wait for that answer. The note must be ≥10 chars and concrete.
 
-If the user picks (c) skip, do NOT call `save_automation_draft`. Tell them you stopped and link the existing agent. Stop here.
+If the user picks (c) skip, do NOT call `save_agent_draft`. Tell them you stopped and link the existing agent. Stop here.
 
 ## Step 5 — Tool grants
 
@@ -251,9 +251,9 @@ Derive from Steps 3 + 4. The user doesn't pick this — you do. Mention it inlin
 | Send | `act_on_integration` (drafts or sends inline per requires_confirmation and write_policy; see the contract above) |
 | Send a Telegram DM (only when user explicitly asked) | `telegram_push` (bypasses draft/confirm — delivers immediately) |
 | Write a memory page | `create_page` |
-| LLM call from sandbox | `automation_complete` |
+| LLM call from sandbox | `agent_complete` |
 | Outbound HTTP (whitelisted hosts) | `http_fetch` |
-| Vault secrets | `automation_secret_list` (read keys), values are auto-substituted in http_fetch |
+| Vault secrets | `agent_secret_list` (read keys), values are auto-substituted in http_fetch |
 | Per-automation K/V (cursors, watermarks) | **none** — `automation_state_*` needs no grant |
 
 **Grant by bare MCP tool name.** A tool reached via `brains.call("name", …)` still needs `name` in the grants — the escape hatch doesn't bypass the allowlist. See **the sandbox authoring contract** above for the full callable surface and which path each integration class uses.
@@ -264,11 +264,11 @@ Derive from Steps 3 + 4. The user doesn't pick this — you do. Mention it inlin
 
 If `http_fetch` is NOT in the grants from Step 5, skip this step silently.
 
-Otherwise — before drafting source in Step 7 — you MUST get explicit user approval for the exact set of hostnames this agent may contact. That set becomes a server-enforced per-agent allowlist: the runtime `http_fetch` handler rejects any other host. The save call (`save_automation_draft`) refuses outright unless this list is passed as `acknowledged_http_fetch_hosts`. So this step is not advisory — without an approved list, the agent literally cannot save.
+Otherwise — before drafting source in Step 7 — you MUST get explicit user approval for the exact set of hostnames this agent may contact. That set becomes a server-enforced per-agent allowlist: the runtime `http_fetch` handler rejects any other host. The save call (`save_agent_draft`) refuses outright unless this list is passed as `acknowledged_http_fetch_hosts`. So this step is not advisory — without an approved list, the agent literally cannot save.
 
 Walk through the host list with the user using this template VERBATIM (substitute the actual hosts and a one-line description of what each call carries):
 
-> "**SECURITY CHECK — `http_fetch` access.** This grant lets the agent send any data the script reads from your brain (emails, board rows, calendar, search results) to the hostnames you approve here. The Deno sandbox does NOT block this — egress happens from the MCP server. Per-agent host pinning is the actual enforcement: the runtime rejects any host not in this list, and `save_automation_draft` refuses to save without it.
+> "**SECURITY CHECK — `http_fetch` access.** This grant lets the agent send any data the script reads from your brain (emails, board rows, calendar, search results) to the hostnames you approve here. The Deno sandbox does NOT block this — egress happens from the MCP server. Per-agent host pinning is the actual enforcement: the runtime rejects any host not in this list, and `save_agent_draft` refuses to save without it.
 >
 > Hosts this agent will contact:
 > - `<host-1>` — `<what it sends/receives, e.g. 'GET market data, no body'>`
@@ -286,7 +286,7 @@ If the user says "change hosts" or names specific hosts, narrow the source to on
 
 If the user attempts to skip the check ("just save it", "I trust you", "stop asking"), refuse politely and re-prompt: *"This one I have to ask explicitly — the server refuses the save without an approved host list. Reply 'yes, approve http_fetch' with the host list above, or 'no'."*
 
-Record the approved host list as an array of bare hostnames (e.g. `["api.binance.com", "api.etherscan.io"]` — no protocol, port, path, or wildcards). You'll pass this verbatim as `acknowledged_http_fetch_hosts` to `save_automation_draft` at Step 8, and surface it again in the Step 7 grant summary so the user sees it one more time before the source is saved.
+Record the approved host list as an array of bare hostnames (e.g. `["api.binance.com", "api.etherscan.io"]` — no protocol, port, path, or wildcards). You'll pass this verbatim as `acknowledged_http_fetch_hosts` to `save_agent_draft` at Step 8, and surface it again in the Step 7 grant summary so the user sees it one more time before the source is saved.
 
 ## Step 5.7 — Secrets (mandatory if the source references `{{secret_name}}`)
 
@@ -297,15 +297,15 @@ If the draft plan calls an external API that needs a credential (an API key, a P
 For each secret the source needs:
 
 1. **Propose a conventional name** — lowercase snake_case matching /^[a-z0-9_]+$/, e.g. `notion_api_token`, `stripe_api_key`. Confirm the NAME with the user, never the value.
-2. **Check whether it already exists:** call `automation_secret_get` with the name — it returns metadata only (a `found` flag plus the secret row's description and timestamps), never the decrypted value. `automation_secret_list` enumerates all stored names when the user isn't sure what they have.
+2. **Check whether it already exists:** call `agent_secret_get` with the name — it returns metadata only (a `found` flag plus the secret row's description and timestamps), never the decrypted value. `agent_secret_list` enumerates all stored names when the user isn't sure what they have.
 3. **If it exists:** reference `{{name}}` in the source and note it in the Step 7 summary ("uses your existing secret `notion_api_token`"). Done — do not ask anything further about it.
 4. **If it's missing**, tell the user, verbatim (substitute the actual name):
 
-> "This agent references a secret named `<name>` that isn't in your vault yet. I won't ask for the value here — pasting API keys into chat leaves them in the transcript. I'll finish the setup referencing it by name; until the value is stored, runs fail with a clear `missing automation_secrets` error, and the agent's page (linked when we finish) lists exactly which secrets are missing. When you're ready, store it with the `automation_secret_set` tool in a message of its own — and if a key has ever been pasted into a shared or logged conversation, rotate it with the provider first."
+> "This agent references a secret named `<name>` that isn't in your vault yet. I won't ask for the value here — pasting API keys into chat leaves them in the transcript. I'll finish the setup referencing it by name; until the value is stored, runs fail with a clear `missing automation_secrets` error, and the agent's page (linked when we finish) lists exactly which secrets are missing. When you're ready, store it with the `agent_secret_set` tool in a message of its own — and if a key has ever been pasted into a shared or logged conversation, rotate it with the provider first."
 
 Then continue the flow — a missing value never blocks Steps 7–9. Step 8 saves as usual and then **immediately pauses** the agent (see the missing-secret pause rule there) so a cron/page trigger can't burn every scheduled run on a secret you know is missing.
 
-**If the user pastes a raw secret value anyway** (unprompted, or in reply to the message above): do NOT refuse and do NOT echo it back. Store it immediately with `automation_secret_set` under the agreed name, confirm by name only ("stored as `notion_api_token`"), and advise once that the value transited this conversation, so rotate it with the provider when practical. Refusing after the paste maximizes exposure for zero benefit.
+**If the user pastes a raw secret value anyway** (unprompted, or in reply to the message above): do NOT refuse and do NOT echo it back. Store it immediately with `agent_secret_set` under the agreed name, confirm by name only ("stored as `notion_api_token`"), and advise once that the value transited this conversation, so rotate it with the provider when practical. Refusing after the paste maximizes exposure for zero benefit.
 
 ## Step 6 — Caps
 
@@ -328,9 +328,9 @@ Pick the skeleton that matches the trigger + write shape (see "Skeletons" below)
 >
 > Sound right?"
 
-**Ask "Sound right?" exactly once.** If the user replies with any approval signal — *"yes"*, *"yep"*, *"go"*, *"go for it"*, *"sounds good"*, *"looks good"*, *"lgtm"*, *"build it"*, *"save it"*, *"do it"*, *"looks fine"*, *"fine"*, *"ok"*, a thumbs-up emoji, or any short affirmation — call `save_automation_draft` **IMMEDIATELY**. Do not re-summarize. Do not re-ask. Do not request another round of confirmation. **Re-asking after approval is a bug** — the user already said yes; treat the next step as "save", not "confirm again".
+**Ask "Sound right?" exactly once.** If the user replies with any approval signal — *"yes"*, *"yep"*, *"go"*, *"go for it"*, *"sounds good"*, *"looks good"*, *"lgtm"*, *"build it"*, *"save it"*, *"do it"*, *"looks fine"*, *"fine"*, *"ok"*, a thumbs-up emoji, or any short affirmation — call `save_agent_draft` **IMMEDIATELY**. Do not re-summarize. Do not re-ask. Do not request another round of confirmation. **Re-asking after approval is a bug** — the user already said yes; treat the next step as "save", not "confirm again".
 
-Only re-iterate if the user gives substantive feedback that changes the plan (e.g. *"narrow the type filter"*, *"raise the wall seconds"*, *"switch the write target"*). At most 2–3 substantive rounds before you should be saving. Mild qualifiers like *"yeah I guess"*, *"sure why not"*, *"ok whatever"* still count as approval — proceed to save.
+Only re-iterate if the user gives substantive feedback that changes it (e.g. *"narrow the type filter"*, *"raise the wall seconds"*, *"switch the write target"*). At most 2–3 substantive rounds before you should be saving. Mild qualifiers like *"yeah I guess"*, *"sure why not"*, *"ok whatever"* still count as approval — proceed to save.
 
 **Mint an `idempotency_key`** (a uuid); record it as `idem=<key>` in your checkpoint.
 
@@ -338,7 +338,7 @@ Only re-iterate if the user gives substantive feedback that changes the plan (e.
 
 ## Step 8 — Save (active) and hand off
 
-Call **`save_automation_draft`** (same MCP namespace) with:
+Call **`save_agent_draft`** (same MCP namespace) with:
 - `idempotency_key` — the `idem` from Step 7. Resend it unchanged on any retry, or you create a second agent on the same cron.
 - `name` (short, kebab-case is fine)
 - `description` (one line)
@@ -348,7 +348,7 @@ Call **`save_automation_draft`** (same MCP namespace) with:
 - `tool_grants` (array of `{tool: "name"}` objects)
 - `cost_cap_daily_usd`, `max_wall_seconds`, `max_llm_tokens`
 - `egress_cap_daily_mb` — only if the user raised it at Step 5.5 (default 10, max 10240)
-- `writes_to_boards` (uuid[]) — same value you passed to find_overlapping_automations
+- `writes_to_boards` (uuid[]) — same value you passed to find_overlapping_agents
 - `dedupe_target_field` (e.g. `"updates"`) — only if the source appends to a shared array
 - `dedupe_key_field` (e.g. `"postId"`) — pair with the above; required for future Step 4.5 checks to be useful
 - `acknowledged_http_fetch_hosts` (string[]) — REQUIRED if `tool_grants` includes `http_fetch`. The exact list of bare hostnames the user approved at Step 5.5 (e.g. `["api.binance.com", "api.etherscan.io"]`). The runtime `http_fetch` handler enforces this list per request; passing a different host at runtime fails with a clear "host not in approved hosts" error. Pass empty / omit if `http_fetch` is not granted (server rejects misleading combinations).
@@ -368,17 +368,17 @@ Never set `acknowledged_overlap: true` without a real coexistence_note — the s
 
 If Step 4.5 returned 0 overlaps, do NOT pass `acknowledged_overlap` or `coexistence_note` — the server rejects the call as misleading.
 
-The new agent lands in `active` state — it will start firing on its cron / page_ingested / board triggers immediately. The smoke test in Step 8.5 uses a manual run (`run_automation_once`), which executes regardless of state. If the user wants to halt scheduled firings after install, they can pause from the agent's page.
+The new agent lands in `active` state — it will start firing on its cron / page_ingested / board triggers immediately. The smoke test in Step 8.5 uses a manual run (`run_agent_once`), which executes regardless of state. If the user wants to halt scheduled firings after install, they can pause from the agent's page.
 
-**Missing-secret pause (mandatory when Step 5.7 left a referenced secret unstored):** right after the save returns, call `update_automation` with `{automation_id, state: "paused"}` — a state-only patch; do NOT pass `tool_grants` or `acknowledged_http_fetch_hosts` with it. An active agent whose secret is missing fails every scheduled run with the same `missing automation_secrets` error until the value is stored; paused, it costs nothing and fires nothing. The Step 8.5 smoke test still works (manual runs execute on paused agents), and Step 9's narration must tell the user it is paused and how to activate. Skip this pause when every referenced secret already exists.
+**Missing-secret pause (mandatory when Step 5.7 left a referenced secret unstored):** right after the save returns, call `update_agent` with `{automation_id, state: "paused"}` — a state-only patch; do NOT pass `tool_grants` or `acknowledged_http_fetch_hosts` with it. An active agent whose secret is missing fails every scheduled run with the same `missing automation_secrets` error until the value is stored; paused, it costs nothing and fires nothing. The Step 8.5 smoke test still works (manual runs execute on paused agents), and Step 9's narration must tell the user it is paused and how to activate. Skip this pause when every referenced secret already exists.
 
 ## Step 8.5 — Smoke test (mandatory)
 
-Before handing off, prove the source compiles and runs end-to-end against a real trigger payload by firing one manual dry run. Call **`run_automation_once`** with:
+Before handing off, prove the source compiles and runs end-to-end against a real trigger payload by firing one manual dry run. Call **`run_agent_once`** with:
 
 - `automation_id` — from Step 8
-- `dry_run: true` — default; suppresses act sends and `telegram_push`. Board and page writes run live under `dry_run` AND `verify_mode` — a smoke test mutates real rows
-- `verify_mode: true` — **REQUIRED for self-verification during this flow.** When true the MCP server suppresses all outbound side-effect tools (telegram_push, email / calendar / drive sends via act_on_integration, fetch_from_integration writes, and non-GET http_fetch) and returns suppressed-shape stubs instead. This lets you confirm the source compiles and the logic path executes end-to-end **without spamming the user's phone / inbox / drive** while you're still iterating.
+- `dry_run: true` — default; suppresses act sends and `telegram_push`. Board and page writes still run live under plain `dry_run` — inertness comes from `verify_mode`
+- `verify_mode: true` — **REQUIRED for self-verification.** Suppresses every write, agent state included (audit still records it). **Board rows and board metadata, plus `create_page`, `remember_correction`, `save_chat_session`, `delete_page`, `restore_page`, stay fully validated** (attempted then rolled back; a dedupe-key or schema error fails); **every other write is not**, so a verify run can pass where a live run would fail. Reads, GETs and LLM completions stay live; blocks land in `verify_mode_blocks`.
 
 The tool enqueues a `trigger_kind='manual'` run and polls `automation_runs` until it terminates (or `wait_seconds` elapses). Default wait is `max_wall_seconds + 90` to cover the runner's ~30s tick + sandbox spawn.
 
@@ -386,14 +386,14 @@ Read the result:
 
 | `status` | What to do |
 |---|---|
-| `succeeded` | Smoke test passed. Quote the key lines from `stdout` to the user (e.g. *"appended postId=mail-abc-123 to row F-001"*) and move to Step 9. |
-| `partial` | The process exited 0 but wrote to stderr — the user's code caught errors and kept going (e.g. one board hit a rate limit, others succeeded). Treat as a failure for smoke-test purposes: show the `stderr` tail, identify the failing operation, fix the source (often a retry/backoff or a tool grant), and re-run. Do NOT call Step 9 until the run is fully `succeeded`. |
-| `failed` / `killed` | Show the user the `error` field + the tail of `stderr`. Common shapes: missing tool grant (`tool 'X' not in grants`), missing board row, schema mismatch on the dedupe key. Patch the source via `update_automation` and re-run `run_automation_once` (keep `verify_mode: true`). **`update_automation`'s `source` is a FULL REPLACEMENT, not a diff** — if you no longer hold the exact source you saved, call `get_automation` first to read the live `source` back (it also returns `write_policy` and `http_fetch_hosts`), patch that, and send the whole thing. Blind-writing a reconstructed source silently drops whatever you forgot. |
+| `succeeded` | Smoke test passed. PROVED: the source compiles, tools are granted, the validated writes really ran. NOT proved: that anything landed — nothing was written, so there is no row to quote; don't narrate one. Report `stdout` + `verify_mode_blocks`, then Step 9. |
+| `partial` | Exited 0 but wrote to stderr — the code caught errors and kept going (e.g. one board hit a rate limit). Treat as a failure: show the `stderr` tail, identify the failing operation, fix the source (often a retry/backoff or a tool grant), re-run. Do NOT call Step 9 until the run is fully `succeeded`. |
+| `failed` / `killed` | Show the user the `error` field + the tail of `stderr`. Common shapes: missing tool grant (`tool 'X' not in grants`), missing board row (expected under `verify_mode`; no fix spent, gate on `brains.runtime.verify`), schema mismatch on the dedupe key. Patch the source via `update_agent` and re-run `run_agent_once` (keep `verify_mode: true`). **`update_agent`'s `source` is a FULL REPLACEMENT, not a diff** — if you no longer hold the exact source you saved, call `get_agent` first to read the live `source` back (it also returns `write_policy` and `http_fetch_hosts`), patch that, and send the whole thing. Blind-writing a reconstructed source silently drops whatever you forgot. |
 | `failed` on `http_fetch: missing automation_secrets for user: <name>` | **Expected when the referenced secret isn't stored yet (Step 5.7)** — the source is not wrong and there is nothing to patch: no source fix happens, so no fix-cycle is consumed and this does NOT count toward the 3-attempt cap (Step 8's state-only pause is not a fix either). Be precise about what this run proved: the source compiles and reaches the first external call; everything past that call did NOT execute and stays unverified until the secret exists. Hand off: *"It's paused until you store the secret `<name>` (the agent's page lists it). Once stored, activate from the page and re-run the check — the logic past the first API call hasn't executed yet."* Do NOT ask for the value to "finish" the smoke test. |
-| `skipped` | The source bailed early (e.g. `if (page.type !== "email") return`). Confirm with the user whether that's the right behaviour for the trigger payload that fired; if yes, move to Step 9. If no, fix the filter and re-run. |
+| `skipped` | The source bailed early (e.g. `if (page.type !== "email") return`). Confirm with the user that's right for the trigger payload that fired; if yes, Step 9. If no, fix the filter and re-run. |
 | `queued` / `running` (timed out — `timed_out: true`) | The run didn't reach a terminal status before `wait_seconds`. The response carries `timeout_reason` (`runner_down` / `runner_slow` / `run_overran`) and a `next_step` line — **surface `next_step` verbatim to the user**, don't improvise a triage table. Then move on to Step 9 without a green-light claim. If `timeout_reason='run_overran'` the smoke test actually executed your code; tail `stdout` / `stderr` from the agent's page before deciding whether to re-run. |
 
-**HARD CAP on the fix-revalidate loop: 3 attempts.** Count every `update_automation` → `run_automation_once` cycle. If the smoke test is still not `succeeded` after 3 attempts:
+**HARD CAP on the fix-revalidate loop: 3 attempts.** Count every `update_agent` → `run_agent_once` cycle. If the smoke test is still not `succeeded` after 3 attempts:
 
 1. Stop iterating. Do not try a 4th fix.
 2. Save what you have (the draft is already persisted from Step 8 — no action needed).
@@ -415,7 +415,7 @@ Narrate, concisely:
 
 **If Step 8 paused it for a missing secret**, narrate instead:
 
-> "Saved but **paused** — it references the secret `<name>`, which isn't in your vault yet. Store it (`automation_secret_set` in a message of its own), then activate from the agent page; it won't fire on its trigger until you do. Smoke test came back `<status>` (run id `<run_id>`)."
+> "Saved but **paused** — it references the secret `<name>`, which isn't in your vault yet. Store it (`agent_secret_set` in a message of its own), then activate from the agent page; it won't fire on its trigger until you do. Smoke test came back `<status>` (run id `<run_id>`)."
 
 Stop here.
 

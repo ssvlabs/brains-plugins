@@ -19,7 +19,7 @@ You're helping the user build a well-structured board. Your job is to turn what 
 - **Respect the escape hatch.** If the user says "just build it" / "whatever you think" / "you decide" at any point, build the current best draft immediately with sensible defaults and skip every remaining question.
 - **Infer, don't ask, the structure.** Columns, whether it's one dataset or several, relationships — you work these out and show them. Don't ask "what columns?" or "does anything connect?" — decide and present it; the user corrects if wrong.
 - **Plain language until the proposal.** Don't say "schema", "column type", "dataset" before the proposal — talk about "what you want to track" and "things that connect".
-- **Use the same MCP namespace that returned this playbook.** Tool names below are written without an `mcp__<server>__` prefix. If you called this as `mcp__brains__create_board_flow`, use `mcp__brains__*` for every downstream call (`create_board`, `list_my_integrations`, `append_board_rows`, `create_board_skill`, `set_dashboard`, `search`, `query`, `get_page`, `create_automation_flow`). Do not mix namespaces.
+- **Use the same MCP namespace that returned this playbook.** Tool names below are written without an `mcp__<server>__` prefix. If you called this as `mcp__brains__create_board_flow`, use `mcp__brains__*` for every downstream call (`create_board`, `list_my_integrations`, `append_board_rows`, `create_board_skill`, `set_dashboard`, `search`, `query`, `get_page`, `create_agent_flow`). Do not mix namespaces.
 
 ## Flow state — one line, every turn
 
@@ -111,9 +111,9 @@ The new board id is in the response. Open it fire-and-forget so the user sees it
 
 Act on the source you proposed:
 
-- **Integration, connected:** offer to keep it fresh — `create_automation_flow` to wire a sync agent — and/or seed once now (`fetch_from_integration` or `search`/`query` → `append_board_rows`).
+- **Integration, connected:** offer to keep it fresh — `create_agent_flow` to wire a sync agent — and/or seed once now (`fetch_from_integration` or `search`/`query` → `append_board_rows`).
 - **Integration, NOT connected:** surface a connect prompt naming the integration and why (*"Connect GitHub and this board stays in sync with your PRs."*). On a surface that supports it, emit it as a connect card (the UI shows the integration's icon + a Connect button — follow your surface instructions); on plain text, give the connect link/instruction in one line. After they connect, wire/seed. If they decline, leave the board manual and note it can be wired later.
-- **Agent:** run `create_automation_flow` to build the writer.
+- **Agent:** run `create_agent_flow` to build the writer.
 - **Manual:** offer a one-time seed — (a) pull from the user's brain pages (`search`/`query` → `get_page` → `append_board_rows`, cite sources briefly), (b) they paste rows, or (c) skip.
 
 Don't make this a wall — one offer, act on the answer, move on.

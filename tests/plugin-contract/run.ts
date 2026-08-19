@@ -1821,8 +1821,8 @@ assert(
 // The automation draft-vs-execute rules, pinned the same way brains-write's
 // contract is (see WRITE_ACTION_CONTRACT_REGION above) and for a reason this
 // artifact demonstrated: the three checks above are the ONLY content assertions
-// brains-automation had. Everything else about this file was digest equality
-// (`run.ts` line ~1447), which proves the bytes came from the catalog and says
+// brains-automation had. Everything else about this file was the manifest digest
+// loop above, which proves the bytes came from the catalog and says
 // nothing about what they say. A regeneration could silently re-drop any rule
 // below and CI here would stay green — which is exactly how the upstream defect
 // these rules fix reached production in the first place.
@@ -1831,7 +1831,7 @@ assert(
 // this repo. A keyword pin dies to paraphrase: "cannot self-confirm" survives
 // "the sandbox may confirm when trusted". A verbatim sentence pin dies at the
 // SEAM: leave the pinned sentence intact and write the contradiction NEXT to it
-// ("verify_mode also holds back board writes") and every substring check stays
+// ("every write is validated under verify_mode") and every substring check stays
 // green while the reader is told the opposite. Only whole-region equality plus a
 // composition check refuses both.
 //
@@ -1872,22 +1872,36 @@ assert(
   "brains-automation's write-policy contract must match the approved copy exactly — a sentence added beside these rules can reverse them while every keyword check passes (regenerate upstream, re-read the change, then update AUTOMATION_WRITE_POLICY_REGION)",
 );
 
-// Rule 2 — the dry_run/verify_mode suppression boundary. This is the one whose
-// previous wording was FALSE: it implied a smoke test muted every side effect,
-// when suppression fires at four call sites only and board and page writes run
-// live. Region is the whole `run_automation_once` argument list, so the
-// verify_mode bullet — the adjacent bullet, and the obvious seam for a
-// contradicting claim — is inside the pin rather than beside it.
+// Rule 2 — the dry_run/verify_mode suppression boundary. Two earlier wordings of
+// this bullet pair were FALSE in opposite directions: the first implied a smoke
+// test muted every side effect; its correction said board and page writes ran
+// live under both flags, which the server's suppression gate
+// (ssvlabs/brains apps/mcp/src/tools/verify-mode-gate.ts) then made false too.
+// What is true now is a TWO-TIER contract, and the region pins BOTH tiers: board
+// rows and metadata plus five named page tools are attempted then rolled back (so
+// their validation still fires), while every other write is refused before its own
+// validation (so a verify run can pass where a live run would fail). Region is the
+// whole `run_agent_once` argument list, so the verify_mode bullet — the adjacent
+// bullet, and the obvious seam for a contradicting claim — is inside the pin
+// rather than beside it.
+//
+// The anchor is hoisted into a const and reused as the region's first line: an
+// upstream tool rename moves it without deleting anything, and quoting what was
+// searched is what tells the next reader that.
+const AUTOMATION_SMOKE_TEST_ANCHOR = "Call **`run_agent_once`** with:";
 const AUTOMATION_SMOKE_TEST_REGION = [
-  "Call **`run_automation_once`** with:",
+  AUTOMATION_SMOKE_TEST_ANCHOR,
   "",
   "- `automation_id` — from Step 8",
-  "- `dry_run: true` — default; suppresses act sends and `telegram_push`. Board and page writes run live under `dry_run` AND `verify_mode` — a smoke test mutates real rows",
-  "- `verify_mode: true` — **REQUIRED for self-verification during this flow.** When true the MCP server suppresses all outbound side-effect tools (telegram_push, email / calendar / drive sends via act_on_integration, fetch_from_integration writes, and non-GET http_fetch) and returns suppressed-shape stubs instead. This lets you confirm the source compiles and the logic path executes end-to-end **without spamming the user's phone / inbox / drive** while you're still iterating.",
+  "- `dry_run: true` — default; suppresses act sends and `telegram_push`. Board and page writes still run live under plain `dry_run` — inertness comes from `verify_mode`",
+  "- `verify_mode: true` — **REQUIRED for self-verification.** Suppresses every write, agent state included (audit still records it). **Board rows and board metadata, plus `create_page`, `remember_correction`, `save_chat_session`, `delete_page`, `restore_page`, stay fully validated** (attempted then rolled back; a dedupe-key or schema error fails); **every other write is not**, so a verify run can pass where a live run would fail. Reads, GETs and LLM completions stay live; blocks land in `verify_mode_blocks`.",
 ].join("\n");
-const automationSmokeStart = automationSkill.indexOf("Call **`run_automation_once`** with:");
+const automationSmokeStart = automationSkill.indexOf(AUTOMATION_SMOKE_TEST_ANCHOR);
 const automationSmokeEnd = automationSkill.indexOf("The tool enqueues");
-assert(automationSmokeStart > 0, "brains-automation must keep its smoke-test invocation");
+assert(
+  automationSmokeStart > 0,
+  `brains-automation must keep its smoke-test invocation — anchor ${JSON.stringify(AUTOMATION_SMOKE_TEST_ANCHOR)} not found. An upstream tool rename moves this anchor without deleting the region: update the anchor AND AUTOMATION_SMOKE_TEST_REGION together — and satisfy yourself the new wording is true of what the server does before updating either`,
+);
 assert(
   automationSmokeEnd > automationSmokeStart,
   "brains-automation's smoke-test arguments must precede the polling paragraph — the slice below depends on it",
@@ -1895,7 +1909,85 @@ assert(
 assert(
   normalizeRegion(automationSkill.slice(automationSmokeStart, automationSmokeEnd)) ===
     AUTOMATION_SMOKE_TEST_REGION,
-  "brains-automation's smoke-test contract must match the approved copy exactly — this is the region that tells an author a mandated dry run still mutates real board and page rows (regenerate upstream, re-read the change, then update AUTOMATION_SMOKE_TEST_REGION)",
+  "brains-automation's smoke-test contract must match the approved copy exactly — this is the region that tells an author which writes a mandated verify run validates-then-rolls-back and which it skips unvalidated (regenerate upstream, re-read the change, then update AUTOMATION_SMOKE_TEST_REGION)",
+);
+
+// Rule 2b — the OTHER half of the same verify_mode correction: how the agent
+// reads the smoke test's result. Rule 2 above pins the arguments; the two rows
+// that say what the result MEANS live in the result table, past the region's
+// `The tool enqueues` terminator, and were unpinned. Both are load-bearing and
+// both were wrong before this correction:
+//
+//   * `succeeded` used to hand the agent a sample line to quote back ("appended
+//     postId=… to row F-001"). Under verify_mode nothing is written, so that
+//     narrates a row the user does not have. The row now says so explicitly.
+//   * `failed` lists "missing board row" as a patch-and-retry cause, which is
+//     HALF wrong under verify_mode: a chained read finds nothing because the
+//     write was suppressed, so an agent patches correct source and burns the
+//     3-attempt cap. The carve-out is what stops that.
+//
+// WHY A ROW PIN PLUS FRAGMENTS, not a region extension. The same trade Rule 3
+// records for the grant table: the table's other rows (`partial`, `skipped`, the
+// missing-secret row, the timeout row) move upstream for reasons unrelated to
+// this contract, so ending the region past them would red this build on every
+// unrelated row edit while adding no coverage of this rule. The `succeeded` row
+// is pinned WHOLE — it is short and every clause of it is load-bearing — plus a
+// uniqueness check over whitespace-normalized lines, so a second row opening the
+// same way fails even if it is indented or spaced differently. That narrows the
+// seam a lone row pin leaves rather than closing it: a contradiction written as
+// prose, or under a different row label, is outside what either check reads. The
+// `failed` row's carve-out is held by a PLACEMENT check instead: that row also
+// carries `update_agent` full-replacement mechanics that move for unrelated
+// reasons, so only the clause carrying the verify_mode meaning is held, and it
+// is held where it has to appear rather than merely somewhere in the file.
+//
+// TO UPDATE: same as its siblings — read the upstream diff, satisfy yourself the
+// new wording is true of what the server does, then update these constants.
+const AUTOMATION_SUCCEEDED_RESULT_ROW =
+  "| `succeeded` | Smoke test passed. PROVED: the source compiles, tools are granted, the validated writes really ran. NOT proved: that anything landed — nothing was written, so there is no row to quote; don't narrate one. Report `stdout` + `verify_mode_blocks`, then Step 9. |";
+const automationResultRows = normalizeRegion(automationSkill)
+  .split("\n")
+  .map((line) => line.replace(/\s+/g, " ").trimStart())
+  .filter((line) => line.startsWith("| `succeeded` |"));
+assert(
+  automationResultRows.length === 1,
+  `brains-automation must state the succeeded-result contract exactly once — ${automationResultRows.length} rows open with it, so a reader can be routed by whichever they read first (regenerate upstream, re-read the change, then update AUTOMATION_SUCCEEDED_RESULT_ROW)`,
+);
+assert(
+  automationResultRows[0] === AUTOMATION_SUCCEEDED_RESULT_ROW,
+  "brains-automation's succeeded-result row must match the approved copy exactly — it is where an author learns a green verify run wrote nothing and has no row to quote (regenerate upstream, re-read the change, then update AUTOMATION_SUCCEEDED_RESULT_ROW)",
+);
+// The retired example, banned file-wide: it is the specific sentence that taught
+// an agent to narrate a write that never happened.
+assert(
+  !automationSkill.includes("appended postId=mail-abc-123"),
+  "brains-automation must not re-introduce the sample appended-row line — under verify_mode nothing is written, so quoting it narrates a row the user does not have",
+);
+// The `failed` row's verify_mode carve-out, checked PER LINE rather than as a
+// file-wide substring. A bare `includes` proves the text exists SOMEWHERE, not
+// that it sits beside the cause it qualifies: a regeneration that reinstates
+// "missing board row" as an unqualified patch-and-retry cause here, while the
+// carved sentence survives further down the file, passes a substring check and
+// sends the agent to patch correct source anyway. So the rule is placement —
+// every line that raises a missing board row must carry the whole parenthetical
+// — plus an existence check, because "no line violates it" is vacuously true of
+// a file that dropped the cause entirely. Line-scoped rather than row-pinned:
+// the rest of that row is `update_agent` full-replacement mechanics that move
+// for unrelated reasons (regenerate upstream, re-read the change, then update
+// AUTOMATION_VERIFY_CARVE_OUT).
+const AUTOMATION_VERIFY_CARVE_OUT =
+  "(expected under `verify_mode`; no fix spent, gate on `brains.runtime.verify`)";
+const missingBoardRowLines = normalizeRegion(automationSkill)
+  .split("\n")
+  .map((line) => line.replace(/\s+/g, " "))
+  .filter((line) => line.includes("missing board row"));
+assert(
+  missingBoardRowLines.every((line) => line.includes(AUTOMATION_VERIFY_CARVE_OUT)),
+  "brains-automation raises a missing board row without the verify_mode carve-out beside it — the carve-out elsewhere in the file does not reach a reader of this line, who patches correct source and burns the 3-attempt cap (regenerate upstream, re-read the change, then update AUTOMATION_VERIFY_CARVE_OUT)",
+);
+assert(
+  missingBoardRowLines.length >= 1,
+  "brains-automation lost its missing-board-row guidance entirely — the placement check above passes vacuously without it, so this is what keeps the carve-out present",
 );
 
 // Rule 3 — the grant table's Send row, which states when `act_on_integration`
