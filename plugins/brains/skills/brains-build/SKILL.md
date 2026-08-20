@@ -19,7 +19,7 @@ Don't restate that artifact here — open it.
 | **Bulk upload** | Load a large or arbitrary-format file into a board without reading it into context. | `create_import_grant` → `bulk_append_rows` |
 | **Dashboard** | A live, interactive view of a board that you author as a full HTML app. | `get_dashboard` → `set_dashboard` |
 | **Page** | A first-class note in a brain. | `create_page` |
-| **Automation** | A sandboxed TS program on a cron schedule with a scoped token. | `create_automation_flow` if your client exposes it (follow the playbook it returns), otherwise the Agents page (`/agents`) |
+| **Automation** | A sandboxed TS program on a cron schedule with a scoped token. | `create_agent_flow` if your client exposes it (follow the playbook it returns), otherwise the Agents page (`/agents`) |
 | **Recurring brief / digest** | Install a prebuilt automation that sends a recurring summary instead of scaffolding one. | `list_recipes` → `install_recipe` |
 | **Workflow** | A goal container: charter, KPIs, deadlines, roster, an owned board and template automations. | `create_workflow_flow` if your client exposes it (follow the playbook it returns), otherwise `create_workflow` |
 | **Mini-site** | Static sandboxed HTML on a brain — a deck, a one-pager, a shareable link. | `create_mini_site` |

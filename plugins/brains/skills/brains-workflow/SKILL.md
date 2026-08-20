@@ -138,7 +138,7 @@ Do NOT hand off to the user yet — Step 8.5 must run first.
 
 A template that renders cleanly is not the same as a template that runs cleanly. Render-time substitution can still produce source that fails on a missing tool grant, a board row shape the template assumed, an empty roster the cron summary crashes on, or a typo in a field name. **Never tell the user the workflow is ready until each attached agent has actually executed once.** Templates are not exempt — they're more likely to silently break than hand-written source, because the user never read them.
 
-For each `automation_id` returned by `create_workflow`, call `run_automation_once` with:
+For each `automation_id` returned by `create_workflow`, call `run_agent_once` with:
 
 - `automation_id` — the id from the array
 - `dry_run: true` — execute the source against a real trigger payload but suppress outbound writes; same hook as the admin Dry-Run button
@@ -150,8 +150,8 @@ Read each result:
 | `status` | What to do |
 |---|---|
 | `succeeded` | Note one line of `stdout` to confirm intent (e.g. *"progress_scorer: scored 0/4 KPIs, no slip"*). Continue. |
-| `partial` | Exit 0 but stderr non-empty — the template caught errors and kept going. Treat as a failure for smoke-test purposes: show the user the `stderr` tail, patch via `update_automation` (usually a retry/backoff around the failing call), and re-run. Don't continue until it goes fully green. |
-| `failed` / `killed` | Show the user the `error` field + tail of `stderr`. Common shapes: tool-grant mismatch (`tool 'X' not in grants`), empty roster (`Cannot read properties of undefined`), missing field on the freshly-created board. Patch via `update_automation` and re-run `run_automation_once`. Two failures on the same agent → stop and ask the user how to proceed, don't guess a third fix. |
+| `partial` | Exit 0 but stderr non-empty — the template caught errors and kept going. Treat as a failure for smoke-test purposes: show the user the `stderr` tail, patch via `update_agent` (usually a retry/backoff around the failing call), and re-run. Don't continue until it goes fully green. |
+| `failed` / `killed` | Show the user the `error` field + tail of `stderr`. Common shapes: tool-grant mismatch (`tool 'X' not in grants`), empty roster (`Cannot read properties of undefined`), missing field on the freshly-created board. Patch via `update_agent` and re-run `run_agent_once`. Two failures on the same agent → stop and ask the user how to proceed, don't guess a third fix. |
 | `skipped` | Source bailed early (e.g. *"no tasks due in window"* for task_nudger on a brand-new workflow with zero tasks). Expected for an empty workflow; confirm with the user that the skip reason matches the trigger payload that fired, then continue. |
 | `queued` / `running` (timed out — `timed_out: true`) | Run didn't reach a terminal status before `wait_seconds`. The response carries `timeout_reason` + a `next_step` line — **surface `next_step` verbatim** for this template (don't roll your own triage table) and continue. Don't claim success. |
 
@@ -174,5 +174,5 @@ Only after Step 8.5 is complete: hand the user the `workflow_url` and `dashboard
 - **Be assertive on templates.** Recommend all three; do not enumerate-and-ask unless the user pushes back.
 - **Every workflow has a dashboard.** It's mandatory — `create_workflow` always provisions one.
 - **Always end in a single `create_workflow` call.** Do not try to wire agents, boards, or dashboards manually — the tool handles provisioning.
-- **Templates only.** No hand-rolled agent source in this flow — that's what create_automation_flow is for.
+- **Templates only.** No hand-rolled agent source in this flow — that's what create_agent_flow is for.
 - **Smoke-test every attached agent before hand-off.** Step 8.5 is mandatory; a "template" agent can fail at runtime exactly like a hand-rolled one, and the user has not read the rendered source. Don't claim a workflow is ready until every attached agent has executed once.

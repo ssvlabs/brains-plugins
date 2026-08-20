@@ -7,34 +7,34 @@
   "artifacts": [
     {
       "capability_id": "integration-actions",
-      "catalog_sha256": "f93159bc3af5e891ae4b31c82178535242783c5419a07cd76b5aa3598ff299a7",
+      "catalog_sha256": "1af48091ed8bc4b9485b0b04b1c8e166b5deb1db84785394e4c127a1922c91dd",
       "artifact_path": "plugins/brains/skills/brains-write/SKILL.md",
       "artifact_sha256": "c289803f96c35dcfd5347e46177c009850dfdc4b42579a770ea6516d0c60e2af"
     },
     {
       "capability_id": "brains-features",
-      "catalog_sha256": "9976952657698137f1ab4cb0d9eb547555e0c966659632cc4d14e5797d66830b",
+      "catalog_sha256": "679169b9e149e2a072d3761617a28d231ad2be884740f7dc6a4c5e0e05faf4a2",
       "artifact_path": "plugins/brains/skills/brains-build/SKILL.md",
-      "artifact_sha256": "95261ee804b3b3cae4f42231264aafa64c96753dce71ab851fad6f97eed37c48"
+      "artifact_sha256": "e912d7f77a1cc7b8a62ef86f9fa40e8f175e7c9bfaebc6674df34ca66dfa2217"
     },
     {
       "capability_id": "procedure:board",
       "catalog_sha256": "d9242158554683b1b18ac2f26ebfecf6c0d42c00e480524be2e6ee35df1fb879",
       "artifact_path": "plugins/brains/skills/brains-board/SKILL.md",
-      "artifact_sha256": "bfc28da5ef20ec559fe10bd9b21d2d7ca673de5533f012bd9cfaa3947241cf6f"
+      "artifact_sha256": "d7ea8d401d7742ef060377e9c4d1d93e5f8327dc2932306b29d766caf749b344"
     },
     {
       "capability_id": "procedure:automation",
-      "catalog_sha256": "ea1e883788e138e39b80627e5a14d6ac35dc7f658b4628e7e32084bb6620fe8b",
+      "catalog_sha256": "25a7694ffe3089a60aa7d9561bd09d83d47b169846cea9f4953103895de50427",
       "artifact_path": "plugins/brains/skills/brains-automation/SKILL.md",
-      "artifact_sha256": "c91cc266c317a5d2ae479594ecad0e5048970d7431139777ea61f401bb4e9cc6"
+      "artifact_sha256": "f10c567b6fb56aedea34a86b9716b8af80c490f7d148bb2fe7cf44c16bda0fae"
     },
     {
       "capability_id": "procedure:workflow",
       "catalog_sha256": "ec1f5989adae2630f16879299f05cc79c6aabfd9897c968c69618882b35f1278",
       "artifact_path": "plugins/brains/skills/brains-workflow/SKILL.md",
-      "artifact_sha256": "b22814fd630ed78964d54440ec327e3aebcde8c812aaa9985fff9c4d345d3f09"
+      "artifact_sha256": "349aed79785c6345d120348d7283c00401032d3afa46ca6199c5cb67ae7e4a3e"
     }
   ],
-  "source_commit": "6fb7b2356592b4e5313176cc55d6d06cb3130e31"
+  "source_commit": "d9d09bd82d8c16128a67429d46b658c78ac82788"
 }
