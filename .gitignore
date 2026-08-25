@@ -55,6 +55,9 @@
 *.kdev4.*
 # ...
 
+# Agent task scaffolding (task briefs, plans, progress) — local workspace state
+.subtask/
+
 # ─────────────────────────────────────────────────────────────────────────
 # 4. Language-Agnostic Build Artifacts
 # ─────────────────────────────────────────────────────────────────────────

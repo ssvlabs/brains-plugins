@@ -2198,6 +2198,14 @@ assert(
 // there was positional, not structural. Unbalanced now fails closed wherever it
 // sits.
 //
+// DELIBERATELY OVER-APPROXIMATE: this also flags the request arm,
+// `brains.fetch({source, request: "…"})`, where the shim sets the flag itself and
+// there is no `input` to carry it. No such call is in the skill today, so the ban
+// does not fire — but if upstream adds one, this reds on CORRECT bytes. Confirm
+// the call really is the request arm, then widen the ban to exempt that form;
+// do NOT narrow it to "calls containing `input:`", which buys a fresh evasion —
+// the trade that produced the seam bugs this pin was already hardened against.
+//
 // NOT a diagnosis of `ingested_count: 0`. Under `verify_mode` — which Step 8.5
 // mandates — `fetch_from_integration` is suppressed and returns zero regardless
 // of the flag (ssvlabs/brains apps/mcp/src/tools/ingest-fetch-act.ts), so a
