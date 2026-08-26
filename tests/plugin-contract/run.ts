@@ -1885,6 +1885,15 @@ assert(
 // bullet, and the obvious seam for a contradicting claim — is inside the pin
 // rather than beside it.
 //
+// The bullet now also carries the EGRESS half: `http_fetch` short-circuits every
+// method before the network (ssvlabs/brains apps/mcp/src/tools/http-fetch.ts) and
+// `adapter_query` is dispositioned `suppress` in VERIFY_MODE_OPEN_WORLD_READS
+// (ssvlabs/brains apps/mcp/src/tools/verify-mode-gate.ts). So "reads stay live" is
+// true of closed-world reads PLUS the `{ live }` entries in that same map — an
+// open-world read is not automatically suppressed: `recommend_recipes` sits in
+// both READ_ONLY and OPEN_WORLD and stays live on its disposition. Re-verify
+// against those two files before re-pinning this region.
+//
 // The anchor is hoisted into a const and reused as the region's first line: an
 // upstream tool rename moves it without deleting anything, and quoting what was
 // searched is what tells the next reader that.
@@ -1894,10 +1903,10 @@ const AUTOMATION_SMOKE_TEST_REGION = [
   "",
   "- `automation_id` — from Step 8",
   "- `dry_run: true` — default; suppresses act sends and `telegram_push`. Board and page writes still run live under plain `dry_run` — inertness comes from `verify_mode`",
-  "- `verify_mode: true` — **REQUIRED for self-verification.** Suppresses every write, agent state included (audit still records it). **Board rows and board metadata, plus `create_page`, `remember_correction`, `save_chat_session`, `delete_page`, `restore_page`, stay fully validated** (attempted then rolled back; a dedupe-key or schema error fails); **every other write is not**, so a verify run can pass where a live run would fail. Reads, GETs and LLM completions stay live; blocks land in `verify_mode_blocks`.",
+  "- `verify_mode: true` — **REQUIRED for self-verification.** Suppresses every write, agent state included. **Board rows and board metadata, plus `create_page`, `remember_correction`, `save_chat_session`, `delete_page`, `restore_page`, stay fully validated** (attempted then rolled back; a dedupe-key or schema error fails); **every other write is not**, so a verify run can pass where a live run would fail. Reads and LLM completions stay live; `http_fetch` (any method) and `adapter_query` are suppressed; blocks land in `verify_mode_blocks`.",
 ].join("\n");
 const automationSmokeStart = automationSkill.indexOf(AUTOMATION_SMOKE_TEST_ANCHOR);
-const automationSmokeEnd = automationSkill.indexOf("The tool enqueues");
+const automationSmokeEnd = automationSkill.indexOf("The tool polls until");
 assert(
   automationSmokeStart > 0,
   `brains-automation must keep its smoke-test invocation — anchor ${JSON.stringify(AUTOMATION_SMOKE_TEST_ANCHOR)} not found. An upstream tool rename moves this anchor without deleting the region: update the anchor AND AUTOMATION_SMOKE_TEST_REGION together — and satisfy yourself the new wording is true of what the server does before updating either`,
@@ -1915,7 +1924,7 @@ assert(
 // Rule 2b — the OTHER half of the same verify_mode correction: how the agent
 // reads the smoke test's result. Rule 2 above pins the arguments; the two rows
 // that say what the result MEANS live in the result table, past the region's
-// `The tool enqueues` terminator, and were unpinned. Both are load-bearing and
+// `The tool polls until` terminator, and were unpinned. Both are load-bearing and
 // both were wrong before this correction:
 //
 //   * `succeeded` used to hand the agent a sample line to quote back ("appended
@@ -1944,7 +1953,7 @@ assert(
 // TO UPDATE: same as its siblings — read the upstream diff, satisfy yourself the
 // new wording is true of what the server does, then update these constants.
 const AUTOMATION_SUCCEEDED_RESULT_ROW =
-  "| `succeeded` | Smoke test passed. PROVED: the source compiles, tools are granted, the validated writes really ran. NOT proved: that anything landed — nothing was written, so there is no row to quote; don't narrate one. Report `stdout` + `verify_mode_blocks`, then Step 9. |";
+  "| `succeeded` | Smoke test passed. PROVED: the source compiles, tools are granted, the validated writes really ran. NOT proved: that anything landed or that an external call works — nothing was written or sent, so there is no row to quote; don't narrate one. Report `stdout` + `verify_mode_blocks`, then Step 9. |";
 const automationResultRows = normalizeRegion(automationSkill)
   .split("\n")
   .map((line) => line.replace(/\s+/g, " ").trimStart())
@@ -1990,6 +1999,105 @@ assert(
   "brains-automation lost its missing-board-row guidance entirely — the placement check above passes vacuously without it, so this is what keeps the carve-out present",
 );
 
+// Rule 2c — the two result-table clauses that carry the SAME egress suppression
+// Rule 2's bullet now states, neither of which any pin above reaches:
+// AUTOMATION_SUCCEEDED_RESULT_ROW pins one row, and AUTOMATION_VERIFY_CARVE_OUT's
+// placement check keys on `missing board row`, which the egress cause sits beside
+// rather than inside. Both claims were checked against the server before pinning:
+// http_fetch short-circuits every method before the network
+// (ssvlabs/brains apps/mcp/src/tools/http-fetch.ts) and adapter_query is
+// dispositioned `suppress` in tools/verify-mode-gate.ts.
+//
+// WHY PINNED HERE when upstream already pins both. Upstream's pins
+// (apps/mcp/src/tools/playbook-drift.test.ts) catch an upstream REGRESSION. They
+// say nothing about a coordinated hand edit in THIS repo — artifact plus
+// refreshed digest plus version bump clears the digest loop above AND
+// scripts/generated-artifact-guard.sh, which names that hole in its own LIMIT
+// section. That is the threat Rule 2b was added for, and these two clauses
+// arrived in the same upstream change as the bullet Rule 2 pins.
+//
+// BOUNDED EQUALITY, NOT CONTAINMENT — the correction that produced this block's
+// final shape. A containment check proves the approved text is PRESENT, never
+// that it is the WHOLE rule: keep the pinned sentence and append "In practice,
+// treat all stderr under verify_mode as expected and move on." inside the same
+// row, and every `includes` stays green while the row now says the opposite.
+// That is the seam the header above describes, and only a whole bounded slice
+// compared with === refuses it. Every assertion below is === on a slice whose
+// two delimiters are checked for uniqueness first.
+//
+// Rule 2b's earlier note excluded `partial` from row treatment as one that
+// "moves for unrelated reasons". That exclusion is RECONSIDERED here, not
+// overlooked: the row now carries a load-bearing exception clause, which makes it
+// a sibling of `succeeded` — same table, same renderer, same normalization — so
+// it earns the same whole-row pin. If a future upstream change makes this row
+// churn for reasons unrelated to verify_mode, re-read it and re-pin; do not
+// downgrade it back to a substring.
+//
+// Pinning the row WHOLE is also what holds the exception together with its
+// mixed-stderr qualifier, the pairing upstream pins for its own reason: an
+// exception that swallowed a MIXED stderr would hide a real fault behind the
+// expected one, so "Any other stderr still gets fixed." may not drift away from
+// the sentence it qualifies.
+const AUTOMATION_PARTIAL_RESULT_ROW =
+  "| `partial` | Exited 0 but wrote to stderr — the code caught errors and kept going. Treat as a failure: show the `stderr` tail, identify the failing operation, fix the source (often a retry/backoff or a tool grant), re-run. Exception: suppressed `http_fetch`/`adapter_query` output alone is expected under `verify_mode` — no fix spent. Any other stderr still gets fixed. Do NOT call Step 9 until the run is fully `succeeded`. |";
+const automationPartialRows = normalizeRegion(automationSkill)
+  .split("\n")
+  .map((line) => line.replace(/\s+/g, " ").trimStart())
+  .filter((line) => line.startsWith("| `partial` |"));
+assert(
+  automationPartialRows.length === 1,
+  `brains-automation must state the partial-result contract exactly once — ${automationPartialRows.length} rows open with it, so a reader can be routed by whichever they read first (regenerate upstream, re-read the change, then update AUTOMATION_PARTIAL_RESULT_ROW)`,
+);
+assert(
+  automationPartialRows[0] === AUTOMATION_PARTIAL_RESULT_ROW,
+  "brains-automation's partial row must match the approved copy exactly — it is where an author learns that a suppressed http_fetch/adapter_query line is the ONE expected stderr and every other one still gets fixed; a sentence added beside that pair reverses it while the pair survives (regenerate upstream, re-read the change, then update AUTOMATION_PARTIAL_RESULT_ROW)",
+);
+
+// The failed/killed row's HEAD — its opener through its cause list — bounded and
+// compared whole for the same reason: appending "Note: a suppressed http_fetch
+// still means the source is wrong — patch it." to the row defeats any containment
+// check on the egress clause.
+//
+// The slice runs from the START OF THE ROW to its "Patch the source via" hand-off,
+// so it is open on ONE side only. An earlier version started at "Common shapes:"
+// and left the row unpinned on BOTH sides; the head is the first sentence a reader
+// of this cell sees, which makes it where a reversal does the most damage, so it
+// is inside the pin now. What stays outside, deliberately, is everything from the
+// hand-off on: that is `update_agent` full-replacement mechanics which drift for
+// reasons unrelated to verify_mode, and a contradiction parked there is NOT caught
+// by this pin. AUTOMATION_VERIFY_CARVE_OUT above is left exactly as it was — this
+// does not widen it.
+//
+// The hand-off delimiter is resolved INSIDE the row, never file-wide: "Common
+// shapes:" also opens an unrelated list in the write-target step, and a file-wide
+// indexOf would slice that one and pin the wrong text.
+//
+// What this pin achieves, stated precisely so it is not read as more: it holds the
+// causes this row DOES name — including the suppressed http_fetch / adapter_query
+// result — against a silent revert or an insertion beside them. It does NOT make
+// the list complete. `fetch_from_integration` is suppressed under verify_mode too
+// and is not named here; that is an upstream gap this pin freezes rather than
+// closes, and naming it is an upstream change.
+const AUTOMATION_FAILED_ROW_HEAD =
+  "| `failed` / `killed` | Show the user the `error` field + the tail of `stderr`. Common shapes: missing tool grant (`tool 'X' not in grants`), missing board row or a suppressed `http_fetch` or `adapter_query` result (expected under `verify_mode`; no fix spent, gate on `brains.runtime.verify`), schema mismatch on the dedupe key. ";
+const automationFailedRows = normalizeRegion(automationSkill)
+  .split("\n")
+  .map((line) => line.replace(/\s+/g, " ").trimStart())
+  .filter((line) => line.startsWith("| `failed` / `killed` |"));
+assert(
+  automationFailedRows.length === 1,
+  `brains-automation must state the failed-result contract exactly once — ${automationFailedRows.length} rows open with it, so a reader can be routed by whichever they read first (regenerate upstream, re-read the change, then update AUTOMATION_FAILED_ROW_HEAD)`,
+);
+const automationFailedRowHandoff = automationFailedRows[0].indexOf("Patch the source via");
+assert(
+  automationFailedRowHandoff > 0,
+  "brains-automation's failed-result row must hand off to `Patch the source via` — the slice below depends on it (regenerate upstream, re-read the change, then update AUTOMATION_FAILED_ROW_HEAD)",
+);
+assert(
+  automationFailedRows[0].slice(0, automationFailedRowHandoff) === AUTOMATION_FAILED_ROW_HEAD,
+  "brains-automation's failed-result row must match the approved copy exactly from its opener through its cause list — it is where an agent learns that a suppressed http_fetch or adapter_query result is expected under verify_mode rather than a fault to patch, and a sentence added anywhere in that span reverses it while every individual cause survives (regenerate upstream, re-read the change, then update AUTOMATION_FAILED_ROW_HEAD)",
+);
+
 // Rule 3 — the grant table's Send row, which states when `act_on_integration`
 // drafts versus sends inline. Pinned as a whole row plus a UNIQUENESS check over
 // the table, not as a region: the other twenty rows are a grant inventory that
@@ -2020,6 +2128,141 @@ assert(
 assert(
   actGrantRows[0] === AUTOMATION_SEND_GRANT_ROW,
   "brains-automation's Send grant row must match the approved copy exactly — it is where an author learns that this tool may send without drafting (regenerate upstream, re-read the change, then update AUTOMATION_SEND_GRANT_ROW)",
+);
+
+// Rule 4 — the integration READ shape, in the sandbox authoring contract table.
+// `write_pages: true` is what makes a fetch PERSIST. An explicit `input` is
+// forwarded verbatim to the source's fetch action, so without the flag the call
+// reaches the provider, writes zero pages and returns `ingested_count: 0` with an
+// empty `page_slugs` (ssvlabs/brains apps/mcp/src/act/legacy-google-shim.ts, where
+// only the `request` branches inject the flag, and tools/ingest-fetch-act.ts,
+// which states it in the tool contract). This cell is what an authoring agent
+// copies, so a revert here ships automations that silently ingest nothing and
+// then read nothing back.
+//
+// Same threat model as Rule 2c — upstream pins this exact string
+// (apps/mcp/src/tools/fetch-from-integration-contract.test.ts) against an
+// upstream regression, not against a hand edit here — and the coverage gap is
+// wider: the change that introduced this shape also REPLACED the second copy that
+// used to repeat it further down with a back-reference, so in this file the rail
+// now lives on exactly one line.
+//
+// CELL EQUALITY, not containment, for the reason Rule 2c records: keeping the
+// safe shape and appending "or `brains.fetch({ source, input })`" beside it in
+// the same cell passes every `includes` while handing the author back the shape
+// that persists nothing. Bounded to the Reads/refresh cell — from its opener to
+// that cell's closing `|` — so the Writes half, which carries the generated
+// action tuple and may legitimately change, stays outside the pin.
+const AUTOMATION_INTEGRATION_READ_CELL =
+  "**Reads/refresh:** `brains.fetch({source, input: {…, write_pages: true}})`. |";
+const automationReadCells: string[] = [];
+for (
+  let index = automationSkillNormalized.indexOf("**Reads/refresh:**");
+  index >= 0;
+  index = automationSkillNormalized.indexOf("**Reads/refresh:**", index + 1)
+) {
+  const cellEnd = automationSkillNormalized.indexOf("|", index);
+  automationReadCells.push(
+    cellEnd === -1
+      ? automationSkillNormalized.slice(index)
+      : automationSkillNormalized.slice(index, cellEnd + 1),
+  );
+}
+assert(
+  automationReadCells.length === 1,
+  `brains-automation must state the integration read shape exactly once — ${automationReadCells.length} Reads/refresh cells found, so a reader can be routed by whichever they read first (regenerate upstream, re-read the change, then update AUTOMATION_INTEGRATION_READ_CELL)`,
+);
+assert(
+  automationReadCells[0] === AUTOMATION_INTEGRATION_READ_CELL,
+  "brains-automation's read cell must match the approved copy exactly — an explicit `input` is forwarded verbatim to the fetch action, so without `write_pages: true` the call reaches the provider and persists nothing, and the automation reads back none of what it fetched (regenerate upstream, re-read the change, then update AUTOMATION_INTEGRATION_READ_CELL)",
+);
+
+// The flag-less shape is then banned BY SHAPE rather than by one spelling. A
+// literal ban catches exactly the string it names: `brains.fetch({ source, input
+// })` survives it on the inner spaces alone, and a different flag-less argument
+// object — `brains.fetch({source, input: {max_results: 50}})` — survives it
+// outright, anywhere in the file including the steps that only back-reference the
+// cell above. So each call site is located by PATTERN, `brains.fetch` followed by
+// optional whitespace and `(`, and its argument text is taken by scanning from
+// that `(`. Requiring `(` to be the immediately next character is not enough:
+// `brains.fetch ({…})` reads as a call to every human and to markdown, and a
+// scanner keyed on the tight spelling silently skips it.
+//
+// Two failure modes are separated ON PURPOSE, because collapsing them is what
+// made the earlier version unsound. A call whose parens never balance is NOT
+// tested for the flag — it is failed on its own message. The scan is not string
+// aware, so an unbalanced `(` inside a quoted argument (`"label:(work"`) runs the
+// slice past the end of the call, and testing THAT slice for `write_pages: true`
+// asks whether the flag appears anywhere downstream: a flag-less call inserted
+// before the one legitimate flagged call would inherit its flag and pass. Safety
+// there was positional, not structural. Unbalanced now fails closed wherever it
+// sits.
+//
+// NO SUBSTRING TEST REMAINS — an IDENTITY invariant replaced it, and that is what
+// makes this total rather than one more spelling to evade. Searching a call's text
+// for `write_pages: true` cannot tell an object key from characters inside a
+// quoted argument, so a second, genuinely flag-less call reading
+// `{q: "note: write_pages: true is set elsewhere"}` passed. Stripping quotes first
+// would be a fifth lexical refinement to a check already evaded four ways by
+// lexical means, and it false-positives on `"write_pages": true`. Instead: the
+// skill must contain EXACTLY ONE `brains.fetch` call, and that call must live
+// inside AUTOMATION_INTEGRATION_READ_CELL — which is pinned byte-exact above. The
+// flag is then pinned byte-exact transitively, and there is no substring left to
+// smuggle.
+//
+// THE COST, stated plainly because it is a real widening: this used to red only on
+// a flag-less second call. It now reds on ANY second `brains.fetch` call, a
+// legitimate one included — the request arm (`{source, request: "…"}`, where the
+// shim sets the flag itself and there is no `input` to carry it), or simply a
+// second worked example added upstream. Neither exists in the skill today. When
+// one arrives, confirm the new call is legitimate and then PIN IT the way the read
+// cell is pinned — a second equality-pinned region, its count included here. Do
+// NOT relax the count back to a substring test: undoing that is what this change
+// is for.
+//
+// NOT a diagnosis of `ingested_count: 0`. Under `verify_mode` — which Step 8.5
+// mandates — `fetch_from_integration` is suppressed and returns zero regardless
+// of the flag (ssvlabs/brains apps/mcp/src/tools/ingest-fetch-act.ts), so a
+// correct call reads zero during the smoke test too. The defect the flag prevents
+// is a LIVE run that fetches and persists nothing.
+const automationFetchCalls: Array<{ text: string; balanced: boolean }> = [];
+const automationFetchPattern = /brains\.fetch\s*\(/g;
+for (
+  let match = automationFetchPattern.exec(automationSkillNormalized);
+  match !== null;
+  match = automationFetchPattern.exec(automationSkillNormalized)
+) {
+  const openParen = match.index + match[0].length - 1;
+  let depth = 0;
+  let callEnd = -1;
+  for (let scan = openParen; scan < automationSkillNormalized.length; scan++) {
+    const char = automationSkillNormalized[scan];
+    if (char === "(") depth++;
+    else if (char === ")") {
+      depth--;
+      if (depth === 0) {
+        callEnd = scan + 1;
+        break;
+      }
+    }
+  }
+  automationFetchCalls.push({
+    text: automationSkillNormalized.slice(match.index, callEnd === -1 ? undefined : callEnd),
+    balanced: callEnd !== -1,
+  });
+}
+assert(
+  automationFetchCalls.length === 1,
+  `brains-automation must show EXACTLY ONE \`brains.fetch(...)\` call — found ${automationFetchCalls.length}. Zero makes the check below vacuous; a second call is how a contradicting example gets in, and the count is what makes that check total rather than a search a flag-less call can slip past (see the note above before changing this)`,
+);
+const unbalancedFetchCalls = automationFetchCalls.filter((call) => !call.balanced);
+assert(
+  unbalancedFetchCalls.length === 0,
+  `brains-automation shows a \`brains.fetch\` call whose parentheses never close, so its arguments cannot be read and the flag check below cannot judge it — refused rather than assumed correct (offending: ${JSON.stringify(unbalancedFetchCalls.map((call) => call.text.slice(0, 120)))})`,
+);
+assert(
+  AUTOMATION_INTEGRATION_READ_CELL.includes(automationFetchCalls[0]!.text),
+  `brains-automation's only \`brains.fetch\` call must be the one inside the pinned Reads/refresh cell — this call is somewhere else, so nothing pins its arguments, and an explicit input without \`write_pages: true\` reaches the provider on a live run, persists nothing and discards what it fetched (offending: ${JSON.stringify(automationFetchCalls[0]!.text)})`,
 );
 
 // This README is the install instructions for anyone who finds the repo directly rather than the

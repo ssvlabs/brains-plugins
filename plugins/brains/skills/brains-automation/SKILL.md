@@ -63,7 +63,7 @@ This is the **complete** surface a sandboxed automation can call. Do NOT guess a
 
 | Integration class | Reachable HOW from the sandbox | Grant to add |
 |---|---|---|
-| **gmail / calendar / drive** (and other codex installs with declared actions) | **Writes:** `brains.act({install_id, action_name, input})` — resolve the action first, pass all 3 fields together, and follow the generated action contract below. **Reads/refresh:** `brains.fetch({source, input})` (a.k.a. `fetch_from_integration`). | `act_on_integration` and/or `fetch_from_integration` |
+| **gmail / calendar / drive** (and other codex installs with declared actions) | **Writes:** `brains.act({install_id, action_name, input})` — resolve the action first, pass all 3 fields together, and follow the generated action contract below. **Reads/refresh:** `brains.fetch({source, input: {…, write_pages: true}})`. | `act_on_integration` and/or `fetch_from_integration` |
 | **adapter integrations — github, monday, …** | `brains.call("adapter_query", {kind, op, ref?, params?})` — ad-hoc mode against the user's stored OAuth token. E.g. `brains.call("adapter_query", {kind:"github", op:"list_open_prs", ref:{owner:"ssvlabs", name:"brains"}})` or `{kind:"monday", op:"list_boards"}`. There is **no** `brains.adapter_query()` helper — go through `brains.call`. These are NOT reachable via `act_on_integration` or `fetch_from_integration`. | `adapter_query` |
 | **telegram** | `brains.telegram_push({text})` — delivers immediately, no draft. | `telegram_push` |
 | **write a memory page** | `brains.create_page({slug, title, body})` — idempotent on (brain_id, slug); overwrites on re-run. Use type `'derived'` or any custom label (reserved types like `email` are rejected). | `create_page` |
@@ -113,7 +113,7 @@ Ask, verbatim:
 Wait. From the answer derive which read tools the source will call: `get_board` (paginate over `{dataset, offset, limit}` if the board is large), `get_page`, `search`, `query`, `list_calendar_events`, etc. You'll bake these into the skeleton.
 
 **If the read involves an integration** (e.g. "open GitHub PRs", "this Monday board's items", "refresh my Gmail first"), pick the path from **the sandbox authoring contract above** — don't guess:
-- gmail / calendar / drive data the cron hasn't ingested yet → `brains.fetch({source, input})`.
+- gmail / calendar / drive data the cron hasn't ingested yet → `brains.fetch` (shape above).
 - **github / monday and other adapter integrations** → `brains.call("adapter_query", {kind, op, ref?})` (ad-hoc mode). These are NOT reachable via `act_on_integration`/`fetch_from_integration`.
 - **When unsure which integrations the user has connected and how each is reachable, call `list_integrations` and read the `supports {fetch, act, adapter}` flags** — `adapter:true` means use `adapter_query`; `fetch`/`act` mean `fetch_from_integration`/`act_on_integration`. Read capabilities; do not probe by trial-and-error.
 - **If this agent requires an integration the user has NOT connected, surface the connect affordance FIRST — don't scaffold an agent that will fail at runtime for missing auth.** The surface renders its own connect UI (a chat client shows an integration-connect card/bar; plain text gives the connect link). Note that connecting the integration is separate from the `http_fetch` grant below — an adapter/OAuth integration must be connected by the user, not just granted.
@@ -378,28 +378,28 @@ Before handing off, prove the source compiles and runs end-to-end against a real
 
 - `automation_id` — from Step 8
 - `dry_run: true` — default; suppresses act sends and `telegram_push`. Board and page writes still run live under plain `dry_run` — inertness comes from `verify_mode`
-- `verify_mode: true` — **REQUIRED for self-verification.** Suppresses every write, agent state included (audit still records it). **Board rows and board metadata, plus `create_page`, `remember_correction`, `save_chat_session`, `delete_page`, `restore_page`, stay fully validated** (attempted then rolled back; a dedupe-key or schema error fails); **every other write is not**, so a verify run can pass where a live run would fail. Reads, GETs and LLM completions stay live; blocks land in `verify_mode_blocks`.
+- `verify_mode: true` — **REQUIRED for self-verification.** Suppresses every write, agent state included. **Board rows and board metadata, plus `create_page`, `remember_correction`, `save_chat_session`, `delete_page`, `restore_page`, stay fully validated** (attempted then rolled back; a dedupe-key or schema error fails); **every other write is not**, so a verify run can pass where a live run would fail. Reads and LLM completions stay live; `http_fetch` (any method) and `adapter_query` are suppressed; blocks land in `verify_mode_blocks`.
 
-The tool enqueues a `trigger_kind='manual'` run and polls `automation_runs` until it terminates (or `wait_seconds` elapses). Default wait is `max_wall_seconds + 90` to cover the runner's ~30s tick + sandbox spawn.
+The tool polls until the run terminates (or `wait_seconds` elapses). Default wait is `max_wall_seconds + 90`.
 
 Read the result:
 
 | `status` | What to do |
 |---|---|
-| `succeeded` | Smoke test passed. PROVED: the source compiles, tools are granted, the validated writes really ran. NOT proved: that anything landed — nothing was written, so there is no row to quote; don't narrate one. Report `stdout` + `verify_mode_blocks`, then Step 9. |
-| `partial` | Exited 0 but wrote to stderr — the code caught errors and kept going (e.g. one board hit a rate limit). Treat as a failure: show the `stderr` tail, identify the failing operation, fix the source (often a retry/backoff or a tool grant), re-run. Do NOT call Step 9 until the run is fully `succeeded`. |
-| `failed` / `killed` | Show the user the `error` field + the tail of `stderr`. Common shapes: missing tool grant (`tool 'X' not in grants`), missing board row (expected under `verify_mode`; no fix spent, gate on `brains.runtime.verify`), schema mismatch on the dedupe key. Patch the source via `update_agent` and re-run `run_agent_once` (keep `verify_mode: true`). **`update_agent`'s `source` is a FULL REPLACEMENT, not a diff** — if you no longer hold the exact source you saved, call `get_agent` first to read the live `source` back (it also returns `write_policy` and `http_fetch_hosts`), patch that, and send the whole thing. Blind-writing a reconstructed source silently drops whatever you forgot. |
+| `succeeded` | Smoke test passed. PROVED: the source compiles, tools are granted, the validated writes really ran. NOT proved: that anything landed or that an external call works — nothing was written or sent, so there is no row to quote; don't narrate one. Report `stdout` + `verify_mode_blocks`, then Step 9. |
+| `partial` | Exited 0 but wrote to stderr — the code caught errors and kept going. Treat as a failure: show the `stderr` tail, identify the failing operation, fix the source (often a retry/backoff or a tool grant), re-run. Exception: suppressed `http_fetch`/`adapter_query` output alone is expected under `verify_mode` — no fix spent. Any other stderr still gets fixed. Do NOT call Step 9 until the run is fully `succeeded`. |
+| `failed` / `killed` | Show the user the `error` field + the tail of `stderr`. Common shapes: missing tool grant (`tool 'X' not in grants`), missing board row or a suppressed `http_fetch` or `adapter_query` result (expected under `verify_mode`; no fix spent, gate on `brains.runtime.verify`), schema mismatch on the dedupe key. Patch the source via `update_agent` and re-run `run_agent_once` (keep `verify_mode: true`). **`update_agent`'s `source` is a FULL REPLACEMENT, not a diff** — if you no longer hold the exact source you saved, call `get_agent` first to read the live `source` back (it also returns `write_policy` and `http_fetch_hosts`), patch that, and send the whole thing. Blind-writing a reconstructed source silently drops whatever you forgot. |
 | `failed` on `http_fetch: missing automation_secrets for user: <name>` | **Expected when the referenced secret isn't stored yet (Step 5.7)** — the source is not wrong and there is nothing to patch: no source fix happens, so no fix-cycle is consumed and this does NOT count toward the 3-attempt cap (Step 8's state-only pause is not a fix either). Be precise about what this run proved: the source compiles and reaches the first external call; everything past that call did NOT execute and stays unverified until the secret exists. Hand off: *"It's paused until you store the secret `<name>` (the agent's page lists it). Once stored, activate from the page and re-run the check — the logic past the first API call hasn't executed yet."* Do NOT ask for the value to "finish" the smoke test. |
-| `skipped` | The source bailed early (e.g. `if (page.type !== "email") return`). Confirm with the user that's right for the trigger payload that fired; if yes, Step 9. If no, fix the filter and re-run. |
+| `skipped` | The source bailed early. Confirm with the user that's right for the trigger payload that fired; if yes, Step 9. If no, fix the filter and re-run. |
 | `queued` / `running` (timed out — `timed_out: true`) | The run didn't reach a terminal status before `wait_seconds`. The response carries `timeout_reason` (`runner_down` / `runner_slow` / `run_overran`) and a `next_step` line — **surface `next_step` verbatim to the user**, don't improvise a triage table. Then move on to Step 9 without a green-light claim. If `timeout_reason='run_overran'` the smoke test actually executed your code; tail `stdout` / `stderr` from the agent's page before deciding whether to re-run. |
 
 **HARD CAP on the fix-revalidate loop: 3 attempts.** Count every `update_agent` → `run_agent_once` cycle. If the smoke test is still not `succeeded` after 3 attempts:
 
 1. Stop iterating. Do not try a 4th fix.
-2. Save what you have (the draft is already persisted from Step 8 — no action needed).
+2. Save what you have (already persisted from Step 8).
 3. Surface the last error clearly to the user: which run id, which `status`, the tail of `stderr`, your best guess at the root cause.
 4. Ask the user explicitly: *"3 fixes in and still failing — want to keep iterating (tell me what you'd change), or save-and-revisit later from `/agents/<id>`?"*
-5. Let the user decide. Do NOT loop indefinitely — that burns the user's turn budget and is a bug, not diligence.
+5. Let the user decide. Do NOT loop indefinitely — that burns the user's turn budget.
 
 Surface the outcome to the user before Step 9 — do not silently swallow failures.
 
