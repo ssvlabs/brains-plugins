@@ -2198,13 +2198,27 @@ assert(
 // there was positional, not structural. Unbalanced now fails closed wherever it
 // sits.
 //
-// DELIBERATELY OVER-APPROXIMATE: this also flags the request arm,
-// `brains.fetch({source, request: "…"})`, where the shim sets the flag itself and
-// there is no `input` to carry it. No such call is in the skill today, so the ban
-// does not fire — but if upstream adds one, this reds on CORRECT bytes. Confirm
-// the call really is the request arm, then widen the ban to exempt that form;
-// do NOT narrow it to "calls containing `input:`", which buys a fresh evasion —
-// the trade that produced the seam bugs this pin was already hardened against.
+// NO SUBSTRING TEST REMAINS — an IDENTITY invariant replaced it, and that is what
+// makes this total rather than one more spelling to evade. Searching a call's text
+// for `write_pages: true` cannot tell an object key from characters inside a
+// quoted argument, so a second, genuinely flag-less call reading
+// `{q: "note: write_pages: true is set elsewhere"}` passed. Stripping quotes first
+// would be a fifth lexical refinement to a check already evaded four ways by
+// lexical means, and it false-positives on `"write_pages": true`. Instead: the
+// skill must contain EXACTLY ONE `brains.fetch` call, and that call must live
+// inside AUTOMATION_INTEGRATION_READ_CELL — which is pinned byte-exact above. The
+// flag is then pinned byte-exact transitively, and there is no substring left to
+// smuggle.
+//
+// THE COST, stated plainly because it is a real widening: this used to red only on
+// a flag-less second call. It now reds on ANY second `brains.fetch` call, a
+// legitimate one included — the request arm (`{source, request: "…"}`, where the
+// shim sets the flag itself and there is no `input` to carry it), or simply a
+// second worked example added upstream. Neither exists in the skill today. When
+// one arrives, confirm the new call is legitimate and then PIN IT the way the read
+// cell is pinned — a second equality-pinned region, its count included here. Do
+// NOT relax the count back to a substring test: undoing that is what this change
+// is for.
 //
 // NOT a diagnosis of `ingested_count: 0`. Under `verify_mode` — which Step 8.5
 // mandates — `fetch_from_integration` is suppressed and returns zero regardless
@@ -2238,20 +2252,17 @@ for (
   });
 }
 assert(
-  automationFetchCalls.length >= 1,
-  "brains-automation must show at least one `brains.fetch(...)` call — without one the flag check below passes vacuously",
+  automationFetchCalls.length === 1,
+  `brains-automation must show EXACTLY ONE \`brains.fetch(...)\` call — found ${automationFetchCalls.length}. Zero makes the check below vacuous; a second call is how a contradicting example gets in, and the count is what makes that check total rather than a search a flag-less call can slip past (see the note above before changing this)`,
 );
 const unbalancedFetchCalls = automationFetchCalls.filter((call) => !call.balanced);
 assert(
   unbalancedFetchCalls.length === 0,
   `brains-automation shows a \`brains.fetch\` call whose parentheses never close, so its arguments cannot be read and the flag check below cannot judge it — refused rather than assumed correct (offending: ${JSON.stringify(unbalancedFetchCalls.map((call) => call.text.slice(0, 120)))})`,
 );
-const flaglessFetchCalls = automationFetchCalls.filter(
-  (call) => !call.text.includes("write_pages: true"),
-);
 assert(
-  flaglessFetchCalls.length === 0,
-  `brains-automation shows a \`brains.fetch\` call whose input does not carry \`write_pages: true\` — an explicit input is forwarded verbatim, so on a live run that call reaches the provider, persists nothing and discards what it fetched (offending: ${JSON.stringify(flaglessFetchCalls.map((call) => call.text))})`,
+  AUTOMATION_INTEGRATION_READ_CELL.includes(automationFetchCalls[0]!.text),
+  `brains-automation's only \`brains.fetch\` call must be the one inside the pinned Reads/refresh cell — this call is somewhere else, so nothing pins its arguments, and an explicit input without \`write_pages: true\` reaches the provider on a live run, persists nothing and discards what it fetched (offending: ${JSON.stringify(automationFetchCalls[0]!.text)})`,
 );
 
 // This README is the install instructions for anyone who finds the repo directly rather than the
