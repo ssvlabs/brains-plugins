@@ -65,13 +65,26 @@ the two lists yourself, presenting them as what they are.
 - **Legs.** `legs` selects retrieval strategies. The protocol guarantees:
   - `legs.vec:false` is a **keyword-only** search that makes **no embedding
     call** — the route for an exact identifier (a PR number, a ticket id, a
-    quoted phrase). Don't send `cutoff` (or `entity`) with it — they have no
-    meaning there; `query_pages` rejects them, the other arms ignore them.
+    quoted phrase). Don't send `cutoff`, `cutoff_strength` or `entity` with it:
+    keyword hits carry no similarity, so there is nothing for the statistical
+    gate to judge. `query_pages` rejects all three; the other arms reject a
+    non-default `cutoff_strength` and simply omit `cut` from the response.
   - Otherwise all legs are on (hybrid). Drop `keyword` for purely conceptual
     text; the entity leg (pages only) needs the semantic leg.
 - **`limit`** caps the returned list. **`cutoff:false`** disables the statistical
   trim, so the ranked list is returned up to `limit` instead of only its
   significant head.
+- **`cutoff_strength`** (`lenient` | `normal` | `strict`, default `normal`)
+  tunes that trim instead of switching it off. `lenient` is the move after a
+  scoped call comes back thin or empty; `strict` is for a last narrowing step.
+  Not accepted together with `cutoff:false` — that turns the gate off, so a
+  strength for it means nothing.
+- **Nothing else.** The arms take `text`, `legs`, `limit`, `cutoff`,
+  `cutoff_strength` and one scope each (`type` on pages, `board_id` on rows,
+  `grain` on mini-sites; boards has none), and they now **reject** anything
+  else rather than ignoring it. There is no snippet, field, date, exclude or
+  anchor parameter: to get fewer, older or different items, change `text`, the
+  scope, `legs`, `limit` or the strength.
 
 ### 4. What a response guarantees
 
@@ -81,6 +94,20 @@ Every response from the four arms (`query_pages` / `query_rows` /
 and handle that reads one item in full. Some arms add `approximate` (results may
 be incomplete under the current scope) and `candidates` (how many were ranked
 before the cutoff). Treat any other field as informational, not as contract.
+
+**`cut` tells you WHY a list is short, which `count: 0` alone cannot.**
+`cut: {admitted, dropped, strength}`: `admitted: false` with a non-zero
+`candidates` means the gate rejected the whole section as noise — items were
+retrieved and thrown away — so relax it (`cutoff_strength: "lenient"`, then
+`cutoff: false`) or scope differently. `admitted: true` with `dropped: 0` means
+the gate looked and kept everything, so a short list really is all there is.
+`cut` is **absent** when no gate ran at all (`cutoff: false`, or any
+keyword-only call) — absence is not a passing verdict.
+
+**`visible_at_most`** (rows, boards, mini-sites) bounds how much you can see:
+`7001` means "at least 7000, the probe stopped counting" and `0` means nothing
+is visible to you. A large bound with `strategy: "iterative"` is the signal to
+scope harder. Absent on `query_pages`, and wherever no vector leg ran.
 
 ### 5. Compatibility
 
@@ -105,11 +132,13 @@ out dependent calls in parallel. E.g. "what's on my plate from Noah?" →
 
 The same call twice against the same data is a bug (re-running after
 `fetch_from_integration` is the exception). After a call comes back empty with
-nothing clearly relevant, make the next one *different*: turn `vec` back on if
-it was keyword-only, relax the cutoff if it was semantic (`query_pages` rejects
-`cutoff` on `legs.vec:false`; the other arms ignore it), add or drop a scope, or
-switch collection. Say "found nothing" only after the right arm, well scoped,
-comes back empty — not after one empty call.
+nothing clearly relevant, make the next one *different*: read `cut` first — if
+`admitted` is `false`, the gate is what emptied it, so retry with
+`cutoff_strength: "lenient"` or `cutoff: false` rather than new wording. Turn
+`vec` back on if it was keyword-only (a keyword-only call reports no `cut` at
+all, because nothing was gated), add or drop a scope, or switch collection. Say
+"found nothing" only after the right arm, well scoped, came back empty with the
+gate relaxed — not after one empty call.
 
 ## Cite what you find
 
