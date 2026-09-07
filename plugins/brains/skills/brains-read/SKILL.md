@@ -59,8 +59,9 @@ the two lists yourself, presenting them as what they are.
   `chat_session`, `gh_pr` (not exhaustive — an unknown type returns an empty
   list, not an error). Pass every one you know: a scoped search is more
   complete *and* faster, and the result reports whether it may be incomplete
-  (`approximate: true`) — when it is, **scope harder**, don't re-send the same
-  text.
+  (`approximate: true`) — when it is, **scope harder** if the arm has a scope
+  (`query_boards` and `query_mini_sites` have none: say the coverage may be
+  incomplete instead), don't re-send the same text.
 - **Legs.** `legs` selects retrieval strategies. The protocol guarantees:
   - `legs.vec:false` is a **keyword-only** search that makes **no embedding
     call** — the route for an exact identifier (a PR number, a ticket id, a
@@ -102,13 +103,13 @@ out dependent calls in parallel. E.g. "what's on my plate from Noah?" →
 `query_pages type=email text="Noah" legs={vec:false}` → pick the thread →
 `get_page` → summarize.
 
-The same `text` twice against the same data is a bug (re-running after
+The same call twice against the same data is a bug (re-running after
 `fetch_from_integration` is the exception). After a call comes back empty with
 nothing clearly relevant, make the next one *different*: turn `vec` back on if
-it was keyword-only, relax the cutoff if it was semantic (`cutoff` is rejected
-on `legs.vec:false`), add or drop a scope, or switch collection. Say "found
-nothing" only after the right arm, well scoped, comes back empty — not after one
-empty call.
+it was keyword-only, relax the cutoff if it was semantic (`query_pages` rejects
+`cutoff` on `legs.vec:false`; the other arms ignore it), add or drop a scope, or
+switch collection. Say "found nothing" only after the right arm, well scoped,
+comes back empty — not after one empty call.
 
 ## Cite what you find
 
@@ -128,6 +129,7 @@ week's events", "the deck on Q3 strategy".) Prefer this over the raw
 Gmail-only operators (`has:attachment`, `is:unread`, `newer_than:7d`), the
 gmail-inbox `query_emails` action runs a live Gmail search (see `brains-write`).
 
-If a fetch returns 0, broaden the request, switch legs (`vec:false` ↔ hybrid),
-switch collection, or widen the scope. Still nothing → say so plainly: *"Brains has no page matching X."*
+If a fetch returns 0, broaden the request, switch legs (`vec:false` ↔ hybrid;
+`search` ↔ `query` on a server without the arms), switch collection, or widen
+the scope. Still nothing → say so plainly: *"Brains has no page matching X."*
 Don't fabricate.
