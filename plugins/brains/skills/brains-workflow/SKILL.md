@@ -141,29 +141,29 @@ A template that renders cleanly is not the same as a template that runs cleanly.
 For each `automation_id` returned by `create_workflow`, call `run_agent_once` with:
 
 - `automation_id` — the id from the array
-- `dry_run: true` — execute the source against a real trigger payload but suppress outbound writes; same hook as the admin Dry-Run button
+- `dry_run: true` — suppresses act sends and `telegram_push`; same hook as the admin Dry-Run button. Board and page writes still run live under plain `dry_run` — this step passes no `verify_mode`, so a template that writes rows writes real rows
 
-The tool enqueues a `trigger_kind='manual'` run and polls `automation_runs` until it terminates or `wait_seconds` elapses (default `max_wall_seconds + 90`). Run them sequentially so failures are easy to attribute; do NOT fan out in parallel.
+The tool enqueues a `trigger_kind='manual'` run — branches keyed on a page, board or cron payload do not run — and polls `automation_runs` until it terminates or `wait_seconds` elapses (default `max_wall_seconds + 90`). Run them sequentially so failures are easy to attribute; do NOT fan out in parallel.
 
 Read each result:
 
 | `status` | What to do |
 |---|---|
-| `succeeded` | Note one line of `stdout` to confirm intent (e.g. *"progress_scorer: scored 0/4 KPIs, no slip"*). Continue. |
+| `succeeded` | Note one line of `stdout` to confirm intent (e.g. *"progress_scorer: scored 0/4 KPIs, no slip"*). An early return (e.g. *"no tasks due"* on a brand-new workflow) is also `succeeded` — it proves the source loads, not that the branch past it works; say so. Continue. |
 | `partial` | Exit 0 but stderr non-empty — the template caught errors and kept going. Treat as a failure for smoke-test purposes: show the user the `stderr` tail, patch via `update_agent` (usually a retry/backoff around the failing call), and re-run. Don't continue until it goes fully green. |
 | `failed` / `killed` | Show the user the `error` field + tail of `stderr`. Common shapes: tool-grant mismatch (`tool 'X' not in grants`), empty roster (`Cannot read properties of undefined`), missing field on the freshly-created board. Patch via `update_agent` and re-run `run_agent_once`. Two failures on the same agent → stop and ask the user how to proceed, don't guess a third fix. |
-| `skipped` | Source bailed early (e.g. *"no tasks due in window"* for task_nudger on a brand-new workflow with zero tasks). Expected for an empty workflow; confirm with the user that the skip reason matches the trigger payload that fired, then continue. |
+| `skipped` | A daily cost cap blocked the run (`error` names it) — it never started, nothing to fix. Continue without a green-light claim for this template. |
 | `queued` / `running` (timed out — `timed_out: true`) | Run didn't reach a terminal status before `wait_seconds`. The response carries `timeout_reason` + a `next_step` line — **surface `next_step` verbatim** for this template (don't roll your own triage table) and continue. Don't claim success. |
 
 After every agent has been smoke-tested, write a one-line summary per template before moving on, e.g.:
 
-> *"Smoke test results — progress_scorer ✅ succeeded, task_nudger ⏭ skipped (no tasks yet, expected), milestone_reviewer ✅ succeeded."*
+> *"Smoke test results — progress_scorer ✅ succeeded, task_nudger ✅ succeeded (returned early — no tasks yet), milestone_reviewer ✅ succeeded."*
 
 If any smoke test failed and could not be patched, the workflow is NOT ready. Tell the user which template is broken and that the workflow's status flip will fire a broken agent on its cron. Do not paper over it.
 
 ## Step 9 — Hand off
 
-Only after Step 8.5 is complete: hand the user the `workflow_url` and `dashboard_url`. Tell them the workflow is **active** — attached agents are already firing on their crons. They can flip it to paused from /workflows/<id> if they need to halt them. Surface the smoke-test summary one more time so they know which templates were validated and which were skipped.
+Only after Step 8.5 is complete: hand the user the `workflow_url` and `dashboard_url`. Tell them the workflow is **active** — attached agents are already firing on their crons. They can flip it to paused from /workflows/<id> if they need to halt them. Surface the smoke-test summary one more time so they know what each template's run proved.
 
 ## Hard rules
 
