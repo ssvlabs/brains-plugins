@@ -46,7 +46,7 @@ the flow looks live forever.
 - **One question per turn.** Never ask multiple questions in a single message.
 - **Propose, don't interrogate.** After Steps 1–4 you draft the full source from a template (see Skeletons below) and show it for review. Don't ask "what tool grants?" or "how should it dedupe?" — that's your job once you know the trigger and write target.
 - **The dedupe-key question is mandatory at Step 4.** If the agent appends to a shared collection (`board.updates`, page timeline, etc.) you MUST ask for or infer the dedupe key (`postId` = page slug for emails, `event_id` for calendar events, etc.) and the skeleton MUST include a "skip if already present" check. Do not draft source without it.
-- **`http_fetch` is a high-risk grant; explicit user approval is mandatory at Step 5.5.** Granting `http_fetch` lets the agent send any data the script reads from the brain (emails, board rows, calendar, search results) to any host on the runtime allowlist. The Deno sandbox does NOT block exfiltration — the egress happens from the MCP server in the stage VPC, not from the sandbox, so the host allowlist is the only gate. If `http_fetch` ends up in the proposed grants, you MUST run Step 5.5 verbatim and wait for an explicit "yes" before `save_agent_draft`. Do not soften the wording, do not batch it with other approvals, do not skip it because the hosts "look fine" to you.
+- **`http_fetch` is a high-risk grant; explicit user approval is mandatory at Step 5.5.** Granting `http_fetch` lets the agent send any data the script reads from the brain (emails, board rows, calendar, search results) to any host on the runtime allowlist. The Deno sandbox does NOT block exfiltration — the egress happens from the MCP server, not from the sandbox, so the host allowlist is the only gate. If `http_fetch` ends up in the proposed grants, you MUST run Step 5.5 verbatim and wait for an explicit "yes" before `save_agent_draft`. Do not soften the wording, do not batch it with other approvals, do not skip it because the hosts "look fine" to you.
 - **Never ask the user to paste a secret value into the conversation.** If the source references `{{secret_name}}`, run Step 5.7: names in chat, values in the vault. A missing value never blocks the flow — save + smoke test proceed and fail cleanly until the user stores it.
 - **Use the same MCP namespace that returned this playbook.** If you called this as `mcp__brains__create_automation_flow`, every downstream call (`save_agent_draft`, `get_board`, `search`, etc.) uses `mcp__brains__*`. If you called it under a different namespace, use that one throughout. **Don't mix namespaces.**
 - **Narrate one short line between steps** so the user knows what just happened and what's next.
@@ -57,7 +57,7 @@ This is the **complete** surface a sandboxed automation can call. Do NOT guess a
 
 **Reads (brain pages & boards):**
 - `brains.search({text, type?, limit?})`, `brains.query({text, type?, limit?})`, `brains.discover({text, limit?})` (semantic board/mini-site hits), `brains.discoverRows({text, limit?})` (semantic board-ROW hits), `brains.list_pages({type?, since?, until?, limit?})`, `brains.get_page(slug)` (returns `{...page, markdown, body}`), `brains.list_calendar_events({start, end, limit?})`. **`discover` and `discoverRows` both call the `query` tool — they need the `query` grant, not `search`.**
-- Boards: `brains.boards.get(id, {dataset, offset, limit})` (rows are `[]` unless you pass `dataset`), `brains.boards.list()`, `brains.boards.append(id, rows)`, `brains.boards.update_row(id, row_id, patch)` (**patch ONLY the fields you are changing** — see gotchas), `brains.boards.delete(id, row_id)` (SOFT delete — the row keeps its id and is undoable), `brains.boards.restore(id, row_id)`, `brains.boards.list_skills(id)`, `brains.boards.run_skill(id, name, inputs)`. Flat aliases exist (`brains.get_board`, `brains.append_board_rows`, `brains.update_board_row`, …).
+- Boards: `brains.boards.get(id, {dataset, offset, limit})` (rows are `[]` unless you pass `dataset`), `brains.boards.list()` (ONE size-bounded page, as a bare array — no `has_more`; resolve a board by name with `brains.call("list_boards", {name})`), `brains.boards.append(id, rows)`, `brains.boards.update_row(id, row_id, patch)` (**patch ONLY the fields you are changing** — see gotchas), `brains.boards.delete(id, row_id)` (SOFT delete — the row keeps its id and is undoable), `brains.boards.restore(id, row_id)`, `brains.boards.list_skills(id)`, `brains.boards.run_skill(id, name, inputs)`. Flat aliases exist (`brains.get_board`, `brains.append_board_rows`, `brains.update_board_row`, …).
 
 **Integrations — there are TWO distinct paths. Pick by integration class (confirm with `list_integrations`, see below):**
 
@@ -292,7 +292,7 @@ Record the approved host list as an array of bare hostnames (e.g. `["api.binance
 
 If the draft plan calls an external API that needs a credential (an API key, a PAT, a webhook signing secret), the source references it as `{{secret_name}}` and the value lives in the user's encrypted vault — NOT in this conversation.
 
-**Hard rule: never ask the user to paste a secret value into the chat.** Not "just this once", not encoded, not "only the last 4 characters". A value pasted into a conversation lands in the transcript and whatever logging surrounds it. You work with NAMES; the vault holds values. (A Telegram bot token is not even a vault case — see Step 4.)
+**Hard rule: never ask the user to paste a secret value into the chat.** Not "just this once", not encoded, not "only the last 4 characters". A value pasted into a conversation lands in the transcript and whatever logging surrounds it. You work with NAMES; the vault holds values.
 
 For each secret the source needs:
 
@@ -334,7 +334,7 @@ Only re-iterate if the user gives substantive feedback that changes it (e.g. *"n
 
 **Mint an `idempotency_key`** (a uuid); record it as `idem=<key>` in your checkpoint.
 
-**The Step 5.5 http_fetch egress gate is a separate concern.** That one DOES require the literal phrase `"yes, approve http_fetch"` and cannot be satisfied by generic approval — don't conflate the two. Step 7 is friendly approval; Step 5.5 is a security boundary with intentional friction.
+**The Step 5.5 http_fetch egress gate is a separate concern.** That one DOES require the literal phrase `"yes, approve http_fetch"` and cannot be satisfied by generic approval — don't conflate the two.
 
 ## Step 8 — Save (active) and hand off
 
@@ -351,9 +351,9 @@ Call **`save_agent_draft`** (same MCP namespace) with:
 - `writes_to_boards` (uuid[]) — same value you passed to find_overlapping_agents
 - `dedupe_target_field` (e.g. `"updates"`) — only if the source appends to a shared array
 - `dedupe_key_field` (e.g. `"postId"`) — pair with the above; required for future Step 4.5 checks to be useful
-- `acknowledged_http_fetch_hosts` (string[]) — REQUIRED if `tool_grants` includes `http_fetch`. The exact list of bare hostnames the user approved at Step 5.5 (e.g. `["api.binance.com", "api.etherscan.io"]`). The runtime `http_fetch` handler enforces this list per request; passing a different host at runtime fails with a clear "host not in approved hosts" error. Pass empty / omit if `http_fetch` is not granted (server rejects misleading combinations).
+- `acknowledged_http_fetch_hosts` (string[]) — REQUIRED if `tool_grants` includes `http_fetch`. The exact list of bare hostnames the user approved at Step 5.5 (e.g. `["api.binance.com", "api.etherscan.io"]`). The runtime `http_fetch` handler enforces this list per request. Pass empty / omit if `http_fetch` is not granted (server rejects misleading combinations).
 
-**Hard gate behaviour at save (http_fetch):** if `tool_grants` includes `http_fetch` AND `acknowledged_http_fetch_hosts` is missing or empty, the server REFUSES the save with `save refused: tool_grants includes http_fetch but acknowledged_http_fetch_hosts is missing or empty`. Recover by re-running Step 5.5 with the user, capturing the host list, and retrying the save with the array populated. Don't try to bypass — there is no other path. (And don't pass `acknowledged_http_fetch_hosts` when `http_fetch` is NOT granted — the server rejects that combo as misleading too.)
+**Hard gate behaviour at save (http_fetch):** if `tool_grants` includes `http_fetch` AND `acknowledged_http_fetch_hosts` is missing or empty, the server REFUSES the save with `save refused: tool_grants includes http_fetch but acknowledged_http_fetch_hosts is missing or empty`. Recover by re-running Step 5.5 with the user, capturing the host list, and retrying the save with the array populated. Don't try to bypass — there is no other path.
 
 **Hard gate behaviour at save (overlap):** if Step 4.5 returned `strict_count > 0` AND the user picked option (b) "carry on" / coexist (NOT skip), the server will REFUSE the save unless you also pass:
 
@@ -364,44 +364,44 @@ If the server rejects the save (look for an error message starting with `save re
 - Ask the user for the missing coexistence note (paraphrase the mitigation reasoning they already gave you in Step 4.5) and retry with `acknowledged_overlap: true` plus the note, OR
 - If the user actually meant skip, stop and link them to the existing agent.
 
-Never set `acknowledged_overlap: true` without a real coexistence_note — the server rejects empty / too-short notes by design, and rightly so: the comment is the audit trail.
+Never set `acknowledged_overlap: true` without a real coexistence_note.
 
 If Step 4.5 returned 0 overlaps, do NOT pass `acknowledged_overlap` or `coexistence_note` — the server rejects the call as misleading.
 
-The new agent lands in `active` state — it will start firing on its cron / page_ingested / board triggers immediately. The smoke test in Step 8.5 uses a manual run (`run_agent_once`), which executes regardless of state. If the user wants to halt scheduled firings after install, they can pause from the agent's page.
+The new agent lands in `active` state and starts firing on its triggers immediately.
 
-**Missing-secret pause (mandatory when Step 5.7 left a referenced secret unstored):** right after the save returns, call `update_agent` with `{automation_id, state: "paused"}` — a state-only patch; do NOT pass `tool_grants` or `acknowledged_http_fetch_hosts` with it. An active agent whose secret is missing fails every scheduled run with the same `missing automation_secrets` error until the value is stored; paused, it costs nothing and fires nothing. The Step 8.5 smoke test still works (manual runs execute on paused agents), and Step 9's narration must tell the user it is paused and how to activate. Skip this pause when every referenced secret already exists.
+**Missing-secret pause (mandatory when Step 5.7 left a referenced secret unstored):** right after the save returns, call `update_agent` with `{automation_id, state: "paused"}` — a state-only patch; do NOT pass `tool_grants` or `acknowledged_http_fetch_hosts` with it. An active agent whose secret is missing fails every scheduled run until the value is stored; paused, it fires nothing. The Step 8.5 smoke test still works (manual runs execute on paused agents), and Step 9's narration must tell the user it is paused and how to activate. Skip this pause when every referenced secret already exists.
 
 ## Step 8.5 — Smoke test (mandatory)
 
-Before handing off, prove the source compiles and runs end-to-end against a real trigger payload by firing one manual dry run. Call **`run_agent_once`** with:
+Before handing off, prove the source loads and runs by firing one manual dry run — its trigger is `manual`, so branches keyed on a page, board or cron payload do not run. Call **`run_agent_once`** with:
 
 - `automation_id` — from Step 8
 - `dry_run: true` — default; suppresses act sends and `telegram_push`. Board and page writes still run live under plain `dry_run` — inertness comes from `verify_mode`
-- `verify_mode: true` — **REQUIRED for self-verification.** Suppresses every write, agent state included. **Board rows and board metadata, plus `create_page`, `remember_correction`, `save_chat_session`, `delete_page`, `restore_page`, stay fully validated** (attempted then rolled back; a dedupe-key or schema error fails); **every other write is not**, so a verify run can pass where a live run would fail. Reads and LLM completions stay live; `http_fetch` (any method) and `adapter_query` are suppressed; blocks land in `verify_mode_blocks`.
-
-The tool polls until the run terminates (or `wait_seconds` elapses). Default wait is `max_wall_seconds + 90`.
+- `verify_mode: true` — **REQUIRED for self-verification.** Suppresses every write, agent state included. **Only `append_board_rows`, `bulk_append_rows`, `update_board_row`, `bulk_update_board_rows`, `delete_board_row`, `restore_board_row`, `create_board`, `update_board`, `update_board_schema`, `delete_board`, `create_page`, `remember_correction`, `save_chat_session`, `delete_page`, `restore_page` stay validated** (attempted then rolled back; a dedupe-key or schema error fails); **every other write is suppressed and not validated end to end** — `fetch_from_integration` (`brains.fetch`) returns empty from inside its handler; `http_fetch` still checks its host allowlist and secrets before suppressing — so a verify run can pass where a live run would fail. Reads and LLM completions stay live; `http_fetch` (any method), `adapter_query` and `fetch_from_integration` are suppressed; blocks land in `verify_mode_blocks`. Gate a step that consumes a suppressed result on `brains.runtime.verify` when drafting.
 
 Read the result:
 
 | `status` | What to do |
 |---|---|
-| `succeeded` | Smoke test passed. PROVED: the source compiles, tools are granted, the validated writes really ran. NOT proved: that anything landed or that an external call works — nothing was written or sent, so there is no row to quote; don't narrate one. Report `stdout` + `verify_mode_blocks`, then Step 9. |
-| `partial` | Exited 0 but wrote to stderr — the code caught errors and kept going. Treat as a failure: show the `stderr` tail, identify the failing operation, fix the source (often a retry/backoff or a tool grant), re-run. Exception: suppressed `http_fetch`/`adapter_query` output alone is expected under `verify_mode` — no fix spent. Any other stderr still gets fixed. Do NOT call Step 9 until the run is fully `succeeded`. |
-| `failed` / `killed` | Show the user the `error` field + the tail of `stderr`. Common shapes: missing tool grant (`tool 'X' not in grants`), missing board row or a suppressed `http_fetch` or `adapter_query` result (expected under `verify_mode`; no fix spent, gate on `brains.runtime.verify`), schema mismatch on the dedupe key. Patch the source via `update_agent` and re-run `run_agent_once` (keep `verify_mode: true`). **`update_agent`'s `source` is a FULL REPLACEMENT, not a diff** — if you no longer hold the exact source you saved, call `get_agent` first to read the live `source` back (it also returns `write_policy` and `http_fetch_hosts`), patch that, and send the whole thing. Blind-writing a reconstructed source silently drops whatever you forgot. |
-| `failed` on `http_fetch: missing automation_secrets for user: <name>` | **Expected when the referenced secret isn't stored yet (Step 5.7)** — the source is not wrong and there is nothing to patch: no source fix happens, so no fix-cycle is consumed and this does NOT count toward the 3-attempt cap (Step 8's state-only pause is not a fix either). Be precise about what this run proved: the source compiles and reaches the first external call; everything past that call did NOT execute and stays unverified until the secret exists. Hand off: *"It's paused until you store the secret `<name>` (the agent's page lists it). Once stored, activate from the page and re-run the check — the logic past the first API call hasn't executed yet."* Do NOT ask for the value to "finish" the smoke test. |
-| `skipped` | The source bailed early. Confirm with the user that's right for the trigger payload that fired; if yes, Step 9. If no, fix the filter and re-run. |
+| `succeeded` | PROVED (exit 0, empty stderr — nothing more): the source loads and exits clean on this payload. NOT proved: that anything landed, that an external call works, or that anything past a suppressed call or an early return ran on real data. No row to quote; don't narrate one. Report `stdout` + `verify_mode_blocks`, then Step 9; no green-light claim if nothing ran. |
+| `partial` | Exited 0 but wrote to stderr — the code caught errors and kept going. Treat as a failure: show the `stderr` tail, identify the failing operation, fix the source, re-run. Exception: output expected under `verify_mode` (defined below) alone — no fix spent. Any other stderr still gets fixed. Step 9 only once any other stderr is gone. |
+| `failed` / `killed` | Show the user the `error` field + the tail of `stderr`. Common shapes: missing tool grant (`tool 'X' not in grants`), missing board row or a suppressed call's result (expected under `verify_mode`, defined below; no fix spent — say what past that call did not run; a fault logged before it still gets fixed), schema mismatch on the dedupe key. Except that carve-out and the row below, patch the source via `update_agent` and re-run `run_agent_once` (keep `verify_mode: true`). **`update_agent`'s `source` is a FULL REPLACEMENT, not a diff** — if you no longer hold the exact source you saved, call `get_agent` first to read the live `source` back, patch that, and send the whole thing. |
+| `failed` on `http_fetch: missing automation_secrets for user: <name>` | **Expected when the referenced secret isn't stored yet (Step 5.7)** — nothing to patch, so no fix-cycle is consumed and it does NOT count toward the 3-attempt cap (Step 8's state-only pause is not a fix either). Say precisely what it proved: the source loads and reaches the first external call; nothing past it executed, so that stays unverified until the secret exists. Hand off: *"It's paused until you store the secret `<name>` (the agent's page lists it). Once stored, activate from the page and re-run the check — the logic past the first API call hasn't executed yet."* |
+| `skipped` | A daily cost cap blocked the run (`error` names it) — it never started, nothing to fix. Step 9 without a green-light claim. |
 | `queued` / `running` (timed out — `timed_out: true`) | The run didn't reach a terminal status before `wait_seconds`. The response carries `timeout_reason` (`runner_down` / `runner_slow` / `run_overran`) and a `next_step` line — **surface `next_step` verbatim to the user**, don't improvise a triage table. Then move on to Step 9 without a green-light claim. If `timeout_reason='run_overran'` the smoke test actually executed your code; tail `stdout` / `stderr` from the agent's page before deciding whether to re-run. |
+
+**Expected under `verify_mode`** means the source reacted to this run's suppression: the call it reacted to returned `verify_mode: true` (`http_fetch` returns `status: 0`, `brains.fetch` returns no pages, blocked tools return the gate noop), or it read something an earlier write of this run would have created (see `verify_mode_blocks`). Suppression is deterministic: no re-run for that reaction; Step 9 without a green-light claim, and say if the same reaction would also fire on a live empty result.
 
 **HARD CAP on the fix-revalidate loop: 3 attempts.** Count every `update_agent` → `run_agent_once` cycle. If the smoke test is still not `succeeded` after 3 attempts:
 
-1. Stop iterating. Do not try a 4th fix.
+1. Stop iterating.
 2. Save what you have (already persisted from Step 8).
-3. Surface the last error clearly to the user: which run id, which `status`, the tail of `stderr`, your best guess at the root cause.
+3. Surface the last error: run id, `status`, the `stderr` tail, your best guess at the root cause.
 4. Ask the user explicitly: *"3 fixes in and still failing — want to keep iterating (tell me what you'd change), or save-and-revisit later from `/agents/<id>`?"*
-5. Let the user decide. Do NOT loop indefinitely — that burns the user's turn budget.
+5. Let the user decide. Do NOT loop indefinitely.
 
-Surface the outcome to the user before Step 9 — do not silently swallow failures.
+Surface the outcome before Step 9 — never swallow a failure.
 
 ## Step 9 — Hand off
 
@@ -411,11 +411,11 @@ Open `<WEB_URL>/agents/<id>` fire-and-forget so the user can eyeball + activate:
 
 Narrate, concisely:
 
-> "Saved and active. Smoke test came back `<status>` (run id `<run_id>`). Opening its page now — review triggers / grants. Agent is firing on its trigger from here; pause from that page if you want to halt it."
+> "Saved and active. Smoke test came back `<status>` — <what its row proves> (run id `<run_id>`). Opening its page now — review triggers / grants. Agent is firing on its trigger from here; pause from that page if you want to halt it."
 
 **If Step 8 paused it for a missing secret**, narrate instead:
 
-> "Saved but **paused** — it references the secret `<name>`, which isn't in your vault yet. Store it (`agent_secret_set` in a message of its own), then activate from the agent page; it won't fire on its trigger until you do. Smoke test came back `<status>` (run id `<run_id>`)."
+> "Saved but **paused** — it references the secret `<name>`, which isn't in your vault yet. Store it (`agent_secret_set` in a message of its own), then activate from the agent page; it won't fire on its trigger until you do. Smoke test came back `<status>` — <what its row proves> (run id `<run_id>`)."
 
 Stop here.
 

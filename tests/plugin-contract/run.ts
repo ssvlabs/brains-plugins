@@ -1877,43 +1877,56 @@ assert(
 // test muted every side effect; its correction said board and page writes ran
 // live under both flags, which the server's suppression gate
 // (ssvlabs/brains apps/mcp/src/tools/verify-mode-gate.ts) then made false too.
-// What is true now is a TWO-TIER contract, and the region pins BOTH tiers: board
-// rows and metadata plus five named page tools are attempted then rolled back (so
-// their validation still fires), while every other write is refused before its own
-// validation (so a verify run can pass where a live run would fail). Region is the
-// whole `run_agent_once` argument list, so the verify_mode bullet — the adjacent
-// bullet, and the obvious seam for a contradicting claim — is inside the pin
-// rather than beside it.
+// What is true now is a TWO-TIER contract, and the region pins BOTH tiers: the
+// fifteen tools the bullet names — exactly VERIFY_MODE_ROLLBACK_NAMES in
+// verify-mode-gate.ts — are attempted then rolled back (so their validation still
+// fires), while every other write is suppressed without it (so a verify run can
+// pass where a live run would fail). Region is the whole `run_agent_once`
+// argument list, so the verify_mode bullet — the adjacent bullet, and the obvious
+// seam for a contradicting claim — is inside the pin rather than beside it.
 //
 // The bullet now also carries the EGRESS half: `http_fetch` short-circuits every
-// method before the network (ssvlabs/brains apps/mcp/src/tools/http-fetch.ts) and
-// `adapter_query` is dispositioned `suppress` in VERIFY_MODE_OPEN_WORLD_READS
-// (ssvlabs/brains apps/mcp/src/tools/verify-mode-gate.ts). So "reads stay live" is
-// true of closed-world reads PLUS the `{ live }` entries in that same map — an
-// open-world read is not automatically suppressed: `recommend_recipes` sits in
-// both READ_ONLY and OPEN_WORLD and stays live on its disposition. Re-verify
-// against those two files before re-pinning this region.
+// method before the network, after its DB-only host-allowlist and secret checks
+// (ssvlabs/brains apps/mcp/src/tools/http-fetch.ts); `fetch_from_integration`
+// returns an empty ingest from inside its own handler
+// (apps/mcp/src/tools/ingest-fetch-act.ts); and `adapter_query` is dispositioned
+// `suppress` in VERIFY_MODE_OPEN_WORLD_READS (verify-mode-gate.ts). So "reads stay
+// live" is true of closed-world reads PLUS the `{ live }` entries in that same
+// map — an open-world read is not automatically suppressed: `recommend_recipes`
+// sits in both READ_ONLY and OPEN_WORLD and stays live on its disposition.
+// Re-verify against those three files before re-pinning this region.
 //
-// The anchor is hoisted into a const and reused as the region's first line: an
-// upstream tool rename moves it without deleting anything, and quoting what was
-// searched is what tells the next reader that.
-const AUTOMATION_SMOKE_TEST_ANCHOR = "Call **`run_agent_once`** with:";
+// The anchor is hoisted into a const and reused as the start of the region's first
+// line, and quoting what was searched tells the next reader where the slice
+// begins. It starts at the Step 8.5 lead-in, not at the call, because that
+// sentence carries a claim too: the smoke test is a `trigger_kind='manual'` run
+// whose payload is only actor/flags/via/fired_at (ssvlabs/brains
+// apps/mcp/src/tools/automation-crud.ts, run_automation_once's INSERT), so page-,
+// board- and cron-keyed branches do not run. The earlier wording ("against a real
+// trigger payload") was false and sat outside the pin. The anchor is only the
+// sentence opener so a reword of the claim fails the equality below rather than
+// the lookup, and it is counted because a short anchor can recur.
+const AUTOMATION_SMOKE_TEST_ANCHOR = "Before handing off, prove the source";
 const AUTOMATION_SMOKE_TEST_REGION = [
-  AUTOMATION_SMOKE_TEST_ANCHOR,
+  `${AUTOMATION_SMOKE_TEST_ANCHOR} loads and runs by firing one manual dry run — its trigger is \`manual\`, so branches keyed on a page, board or cron payload do not run. Call **\`run_agent_once\`** with:`,
   "",
   "- `automation_id` — from Step 8",
   "- `dry_run: true` — default; suppresses act sends and `telegram_push`. Board and page writes still run live under plain `dry_run` — inertness comes from `verify_mode`",
-  "- `verify_mode: true` — **REQUIRED for self-verification.** Suppresses every write, agent state included. **Board rows and board metadata, plus `create_page`, `remember_correction`, `save_chat_session`, `delete_page`, `restore_page`, stay fully validated** (attempted then rolled back; a dedupe-key or schema error fails); **every other write is not**, so a verify run can pass where a live run would fail. Reads and LLM completions stay live; `http_fetch` (any method) and `adapter_query` are suppressed; blocks land in `verify_mode_blocks`.",
+  "- `verify_mode: true` — **REQUIRED for self-verification.** Suppresses every write, agent state included. **Only `append_board_rows`, `bulk_append_rows`, `update_board_row`, `bulk_update_board_rows`, `delete_board_row`, `restore_board_row`, `create_board`, `update_board`, `update_board_schema`, `delete_board`, `create_page`, `remember_correction`, `save_chat_session`, `delete_page`, `restore_page` stay validated** (attempted then rolled back; a dedupe-key or schema error fails); **every other write is suppressed and not validated end to end** — `fetch_from_integration` (`brains.fetch`) returns empty from inside its handler; `http_fetch` still checks its host allowlist and secrets before suppressing — so a verify run can pass where a live run would fail. Reads and LLM completions stay live; `http_fetch` (any method), `adapter_query` and `fetch_from_integration` are suppressed; blocks land in `verify_mode_blocks`. Gate a step that consumes a suppressed result on `brains.runtime.verify` when drafting.",
 ].join("\n");
 const automationSmokeStart = automationSkill.indexOf(AUTOMATION_SMOKE_TEST_ANCHOR);
-const automationSmokeEnd = automationSkill.indexOf("The tool polls until");
+const automationSmokeEnd = automationSkill.indexOf("Read the result:");
 assert(
   automationSmokeStart > 0,
-  `brains-automation must keep its smoke-test invocation — anchor ${JSON.stringify(AUTOMATION_SMOKE_TEST_ANCHOR)} not found. An upstream tool rename moves this anchor without deleting the region: update the anchor AND AUTOMATION_SMOKE_TEST_REGION together — and satisfy yourself the new wording is true of what the server does before updating either`,
+  `brains-automation must keep its smoke-test invocation — anchor ${JSON.stringify(AUTOMATION_SMOKE_TEST_ANCHOR)} not found. An upstream reword of the Step 8.5 lead-in moves this anchor without deleting the region: update the anchor AND AUTOMATION_SMOKE_TEST_REGION together — and satisfy yourself the new wording is true of what the server does before updating either`,
+);
+assert(
+  automationSkill.split(AUTOMATION_SMOKE_TEST_ANCHOR).length === 2,
+  `brains-automation's smoke-test anchor ${JSON.stringify(AUTOMATION_SMOKE_TEST_ANCHOR)} must occur exactly once — found ${automationSkill.split(AUTOMATION_SMOKE_TEST_ANCHOR).length - 1}, so the slice below may start at the wrong one`,
 );
 assert(
   automationSmokeEnd > automationSmokeStart,
-  "brains-automation's smoke-test arguments must precede the polling paragraph — the slice below depends on it",
+  "brains-automation's smoke-test arguments must precede the `Read the result:` table lead-in — the slice below depends on it",
 );
 assert(
   normalizeRegion(automationSkill.slice(automationSmokeStart, automationSmokeEnd)) ===
@@ -1924,7 +1937,7 @@ assert(
 // Rule 2b — the OTHER half of the same verify_mode correction: how the agent
 // reads the smoke test's result. Rule 2 above pins the arguments; the two rows
 // that say what the result MEANS live in the result table, past the region's
-// `The tool polls until` terminator, and were unpinned. Both are load-bearing and
+// `Read the result:` terminator, and were unpinned. Both are load-bearing and
 // both were wrong before this correction:
 //
 //   * `succeeded` used to hand the agent a sample line to quote back ("appended
@@ -1953,7 +1966,7 @@ assert(
 // TO UPDATE: same as its siblings — read the upstream diff, satisfy yourself the
 // new wording is true of what the server does, then update these constants.
 const AUTOMATION_SUCCEEDED_RESULT_ROW =
-  "| `succeeded` | Smoke test passed. PROVED: the source compiles, tools are granted, the validated writes really ran. NOT proved: that anything landed or that an external call works — nothing was written or sent, so there is no row to quote; don't narrate one. Report `stdout` + `verify_mode_blocks`, then Step 9. |";
+  "| `succeeded` | PROVED (exit 0, empty stderr — nothing more): the source loads and exits clean on this payload. NOT proved: that anything landed, that an external call works, or that anything past a suppressed call or an early return ran on real data. No row to quote; don't narrate one. Report `stdout` + `verify_mode_blocks`, then Step 9; no green-light claim if nothing ran. |";
 const automationResultRows = normalizeRegion(automationSkill)
   .split("\n")
   .map((line) => line.replace(/\s+/g, " ").trimStart())
@@ -1985,7 +1998,7 @@ assert(
 // for unrelated reasons (regenerate upstream, re-read the change, then update
 // AUTOMATION_VERIFY_CARVE_OUT).
 const AUTOMATION_VERIFY_CARVE_OUT =
-  "(expected under `verify_mode`; no fix spent, gate on `brains.runtime.verify`)";
+  "(expected under `verify_mode`, defined below; no fix spent — say what past that call did not run; a fault logged before it still gets fixed)";
 const missingBoardRowLines = normalizeRegion(automationSkill)
   .split("\n")
   .map((line) => line.replace(/\s+/g, " "))
@@ -1999,14 +2012,12 @@ assert(
   "brains-automation lost its missing-board-row guidance entirely — the placement check above passes vacuously without it, so this is what keeps the carve-out present",
 );
 
-// Rule 2c — the two result-table clauses that carry the SAME egress suppression
-// Rule 2's bullet now states, neither of which any pin above reaches:
+// Rule 2c — the two result-table clauses that carry the SAME suppression Rule 2's
+// bullet now states, neither of which any pin above reaches:
 // AUTOMATION_SUCCEEDED_RESULT_ROW pins one row, and AUTOMATION_VERIFY_CARVE_OUT's
-// placement check keys on `missing board row`, which the egress cause sits beside
-// rather than inside. Both claims were checked against the server before pinning:
-// http_fetch short-circuits every method before the network
-// (ssvlabs/brains apps/mcp/src/tools/http-fetch.ts) and adapter_query is
-// dispositioned `suppress` in tools/verify-mode-gate.ts.
+// placement check holds only its parenthetical. Both rows now route a suppressed
+// call's result through the "Expected under `verify_mode`" definition pinned in
+// Rule 2d, whose server evidence is recorded there.
 //
 // WHY PINNED HERE when upstream already pins both. Upstream's pins
 // (apps/mcp/src/tools/playbook-drift.test.ts) catch an upstream REGRESSION. They
@@ -2039,7 +2050,7 @@ assert(
 // expected one, so "Any other stderr still gets fixed." may not drift away from
 // the sentence it qualifies.
 const AUTOMATION_PARTIAL_RESULT_ROW =
-  "| `partial` | Exited 0 but wrote to stderr — the code caught errors and kept going. Treat as a failure: show the `stderr` tail, identify the failing operation, fix the source (often a retry/backoff or a tool grant), re-run. Exception: suppressed `http_fetch`/`adapter_query` output alone is expected under `verify_mode` — no fix spent. Any other stderr still gets fixed. Do NOT call Step 9 until the run is fully `succeeded`. |";
+  "| `partial` | Exited 0 but wrote to stderr — the code caught errors and kept going. Treat as a failure: show the `stderr` tail, identify the failing operation, fix the source, re-run. Exception: output expected under `verify_mode` (defined below) alone — no fix spent. Any other stderr still gets fixed. Step 9 only once any other stderr is gone. |";
 const automationPartialRows = normalizeRegion(automationSkill)
   .split("\n")
   .map((line) => line.replace(/\s+/g, " ").trimStart())
@@ -2050,7 +2061,7 @@ assert(
 );
 assert(
   automationPartialRows[0] === AUTOMATION_PARTIAL_RESULT_ROW,
-  "brains-automation's partial row must match the approved copy exactly — it is where an author learns that a suppressed http_fetch/adapter_query line is the ONE expected stderr and every other one still gets fixed; a sentence added beside that pair reverses it while the pair survives (regenerate upstream, re-read the change, then update AUTOMATION_PARTIAL_RESULT_ROW)",
+  "brains-automation's partial row must match the approved copy exactly — it is where an author learns that output expected under verify_mode is the ONE expected stderr and every other one still gets fixed; a sentence added beside that pair reverses it while the pair survives (regenerate upstream, re-read the change, then update AUTOMATION_PARTIAL_RESULT_ROW)",
 );
 
 // The failed/killed row's HEAD — its opener through its cause list — bounded and
@@ -2058,7 +2069,7 @@ assert(
 // still means the source is wrong — patch it." to the row defeats any containment
 // check on the egress clause.
 //
-// The slice runs from the START OF THE ROW to its "Patch the source via" hand-off,
+// The slice runs from the START OF THE ROW to its "patch the source via" hand-off,
 // so it is open on ONE side only. An earlier version started at "Common shapes:"
 // and left the row unpinned on BOTH sides; the head is the first sentence a reader
 // of this cell sees, which makes it where a reversal does the most damage, so it
@@ -2073,13 +2084,13 @@ assert(
 // indexOf would slice that one and pin the wrong text.
 //
 // What this pin achieves, stated precisely so it is not read as more: it holds the
-// causes this row DOES name — including the suppressed http_fetch / adapter_query
-// result — against a silent revert or an insertion beside them. It does NOT make
-// the list complete. `fetch_from_integration` is suppressed under verify_mode too
-// and is not named here; that is an upstream gap this pin freezes rather than
-// closes, and naming it is an upstream change.
+// causes this row DOES name — including a suppressed call's result — and the
+// "Except that carve-out and the row below" scope of the patch instruction against
+// a silent revert or an insertion beside them. Which calls count as suppressed is
+// no longer listed here; the row defers to the Rule 2d definition, which is what
+// closed the earlier `fetch_from_integration` gap.
 const AUTOMATION_FAILED_ROW_HEAD =
-  "| `failed` / `killed` | Show the user the `error` field + the tail of `stderr`. Common shapes: missing tool grant (`tool 'X' not in grants`), missing board row or a suppressed `http_fetch` or `adapter_query` result (expected under `verify_mode`; no fix spent, gate on `brains.runtime.verify`), schema mismatch on the dedupe key. ";
+  "| `failed` / `killed` | Show the user the `error` field + the tail of `stderr`. Common shapes: missing tool grant (`tool 'X' not in grants`), missing board row or a suppressed call's result (expected under `verify_mode`, defined below; no fix spent — say what past that call did not run; a fault logged before it still gets fixed), schema mismatch on the dedupe key. Except that carve-out and the row below, ";
 const automationFailedRows = normalizeRegion(automationSkill)
   .split("\n")
   .map((line) => line.replace(/\s+/g, " ").trimStart())
@@ -2088,14 +2099,146 @@ assert(
   automationFailedRows.length === 1,
   `brains-automation must state the failed-result contract exactly once — ${automationFailedRows.length} rows open with it, so a reader can be routed by whichever they read first (regenerate upstream, re-read the change, then update AUTOMATION_FAILED_ROW_HEAD)`,
 );
-const automationFailedRowHandoff = automationFailedRows[0].indexOf("Patch the source via");
+const automationFailedRowHandoff = automationFailedRows[0].indexOf("patch the source via");
 assert(
   automationFailedRowHandoff > 0,
-  "brains-automation's failed-result row must hand off to `Patch the source via` — the slice below depends on it (regenerate upstream, re-read the change, then update AUTOMATION_FAILED_ROW_HEAD)",
+  "brains-automation's failed-result row must hand off to `patch the source via` — the slice below depends on it (regenerate upstream, re-read the change, then update AUTOMATION_FAILED_ROW_HEAD)",
 );
 assert(
   automationFailedRows[0].slice(0, automationFailedRowHandoff) === AUTOMATION_FAILED_ROW_HEAD,
-  "brains-automation's failed-result row must match the approved copy exactly from its opener through its cause list — it is where an agent learns that a suppressed http_fetch or adapter_query result is expected under verify_mode rather than a fault to patch, and a sentence added anywhere in that span reverses it while every individual cause survives (regenerate upstream, re-read the change, then update AUTOMATION_FAILED_ROW_HEAD)",
+  "brains-automation's failed-result row must match the approved copy exactly from its opener through its cause list — it is where an agent learns that a suppressed call's result is expected under verify_mode rather than a fault to patch, and a sentence added anywhere in that span reverses it while every individual cause survives (regenerate upstream, re-read the change, then update AUTOMATION_FAILED_ROW_HEAD)",
+);
+
+// Rule 2d — what "expected under `verify_mode`" MEANS. The partial and failed rows
+// above defer to this definition, so their pins hold a pointer and this holds the
+// rule: widen it to "any stderr under verify_mode" and every fault becomes
+// expected while both rows stay byte-identical. Each shape it names was checked
+// against ssvlabs/brains: http_fetch returns `status: 0` with `verify_mode: true`
+// (apps/mcp/src/tools/http-fetch.ts), fetch_from_integration returns no page slugs
+// with `verify_mode: true` (tools/ingest-fetch-act.ts), the gate noop carries
+// `verify_mode: true` (tools/verify-mode-gate.ts), and each suppression records
+// its tool in `verify_mode_blocks` (tools/handler-helpers.ts). Region runs from
+// the bolded term to the HARD CAP paragraph, EXCLUSIVE; the term is counted so a
+// second, looser definition cannot sit elsewhere in the file.
+//
+// TO UPDATE: read the upstream diff, satisfy yourself the new wording is true of
+// what the server does, then replace AUTOMATION_EXPECTED_DEFINITION.
+const AUTOMATION_EXPECTED_ANCHOR = "**Expected under `verify_mode`** means";
+const AUTOMATION_EXPECTED_DEFINITION =
+  "**Expected under `verify_mode`** means the source reacted to this run's suppression: the call it reacted to returned `verify_mode: true` (`http_fetch` returns `status: 0`, `brains.fetch` returns no pages, blocked tools return the gate noop), or it read something an earlier write of this run would have created (see `verify_mode_blocks`). Suppression is deterministic: no re-run for that reaction; Step 9 without a green-light claim, and say if the same reaction would also fire on a live empty result.";
+const automationExpectedStart = automationSkill.indexOf(AUTOMATION_EXPECTED_ANCHOR);
+const automationExpectedEnd = automationSkill.indexOf("**HARD CAP on the fix-revalidate loop");
+assert(
+  automationSkill.split(AUTOMATION_EXPECTED_ANCHOR).length === 2,
+  `brains-automation must define "expected under verify_mode" exactly once — anchor ${JSON.stringify(AUTOMATION_EXPECTED_ANCHOR)} found ${automationSkill.split(AUTOMATION_EXPECTED_ANCHOR).length - 1} times (regenerate upstream, re-read the change, then update AUTOMATION_EXPECTED_DEFINITION)`,
+);
+assert(
+  automationExpectedEnd > automationExpectedStart,
+  "brains-automation's verify_mode definition must precede the HARD CAP paragraph — the slice below depends on it",
+);
+assert(
+  normalizeRegion(automationSkill.slice(automationExpectedStart, automationExpectedEnd)) ===
+    AUTOMATION_EXPECTED_DEFINITION,
+  "brains-automation's verify_mode definition must match the approved copy exactly — it decides which smoke-test failures an agent skips fixing (regenerate upstream, re-read the change, then update AUTOMATION_EXPECTED_DEFINITION)",
+);
+
+// Rule 2e — the `skipped` row, in BOTH skills that run a smoke test. `skipped` is
+// written only by the runner's three daily-cap paths, before the sandbox is
+// reached (ssvlabs/brains apps/automation-runner/src/runner.ts runOne), so "it
+// never started, nothing to fix" is what keeps an agent from patching source for a
+// budget stop — and "without a green-light claim" from reporting a run that never
+// ran as a pass. Same whole-row + uniqueness shape as Rule 2b.
+//
+// TO UPDATE: read the upstream diff, satisfy yourself the new wording is true of
+// what the server does, then replace the row constant.
+const AUTOMATION_SKIPPED_RESULT_ROW =
+  "| `skipped` | A daily cost cap blocked the run (`error` names it) — it never started, nothing to fix. Step 9 without a green-light claim. |";
+const WORKFLOW_SKIPPED_RESULT_ROW =
+  "| `skipped` | A daily cost cap blocked the run (`error` names it) — it never started, nothing to fix. Continue without a green-light claim for this template. |";
+for (const [label, skill, expected] of [
+  ["brains-automation", automationSkill, AUTOMATION_SKIPPED_RESULT_ROW],
+  ["brains-workflow", workflowSkill, WORKFLOW_SKIPPED_RESULT_ROW],
+] as const) {
+  const skippedRows = normalizeRegion(skill)
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trimStart())
+    .filter((line) => line.startsWith("| `skipped` |"));
+  assert(
+    skippedRows.length === 1,
+    `${label} must state the skipped-result contract exactly once — ${skippedRows.length} rows open with it (regenerate upstream, re-read the change, then update its SKIPPED_RESULT_ROW)`,
+  );
+  assert(
+    skippedRows[0] === expected,
+    `${label}'s skipped row must match the approved copy exactly — it is where an agent learns a cost-cap skip never ran, so there is nothing to fix and nothing to call green (regenerate upstream, re-read the change, then update its SKIPPED_RESULT_ROW)`,
+  );
+}
+
+// Rule 2f — brains-workflow's smoke-test argument list. Plain `dry_run` only
+// reaches act sends and telegram_push: `automationDryRun` is read by the act
+// dispatch path and tools/telegram-push.ts and by no board or page handler, and
+// run_agent_once (an alias of run_automation_once) leaves `verify_mode` false
+// unless it is passed (ssvlabs/brains apps/mcp/src/tools/automation-crud.ts). So a template smoke test
+// writes REAL rows, and the bullet saying so is what stops an agent from treating
+// it as inert. Region is the whole argument list, as in Rule 2, so an added
+// `verify_mode` bullet breaks equality; `verify_mode` is also counted file-wide,
+// because the bullet's "this step passes no `verify_mode`" is only true while it
+// is the skill's one mention.
+//
+// TO UPDATE: read the upstream diff, satisfy yourself the new wording is true of
+// what the server does, then replace WORKFLOW_SMOKE_TEST_REGION.
+const WORKFLOW_SMOKE_TEST_ANCHOR =
+  "For each `automation_id` returned by `create_workflow`, call `run_agent_once` with:";
+const WORKFLOW_SMOKE_TEST_REGION = [
+  WORKFLOW_SMOKE_TEST_ANCHOR,
+  "",
+  "- `automation_id` — the id from the array",
+  "- `dry_run: true` — suppresses act sends and `telegram_push`; same hook as the admin Dry-Run button. Board and page writes still run live under plain `dry_run` — this step passes no `verify_mode`, so a template that writes rows writes real rows",
+].join("\n");
+const workflowSmokeStart = workflowSkill.indexOf(WORKFLOW_SMOKE_TEST_ANCHOR);
+const workflowSmokeEnd = workflowSkill.indexOf("The tool enqueues a");
+assert(
+  workflowSmokeStart > 0,
+  `brains-workflow must keep its smoke-test invocation — anchor ${JSON.stringify(WORKFLOW_SMOKE_TEST_ANCHOR)} not found (regenerate upstream, re-read the change, then update the anchor AND WORKFLOW_SMOKE_TEST_REGION together)`,
+);
+assert(
+  workflowSmokeEnd > workflowSmokeStart,
+  "brains-workflow's smoke-test arguments must precede the enqueue paragraph — the slice below depends on it",
+);
+assert(
+  normalizeRegion(workflowSkill.slice(workflowSmokeStart, workflowSmokeEnd)) === WORKFLOW_SMOKE_TEST_REGION,
+  "brains-workflow's smoke-test arguments must match the approved copy exactly — this is where an agent learns a template smoke test writes real rows (regenerate upstream, re-read the change, then update WORKFLOW_SMOKE_TEST_REGION)",
+);
+assert(
+  workflowSkill.split("verify_mode").length === 2,
+  `brains-workflow must mention verify_mode only in the dry_run bullet that says this step does not pass it — found ${workflowSkill.split("verify_mode").length - 1} mentions (re-read the change: if the step now passes verify_mode, the bullet and WORKFLOW_SMOKE_TEST_REGION are wrong too)`,
+);
+
+// Rule 2g — `brains.boards.list()` return shape. The sandbox helper returns a bare
+// array of ONE page (limit 200 when the caller sets none), never `has_more`
+// (ssvlabs/brains apps/automation-runner/src/sandbox/brains.ts, `boards.list` and
+// withWidestPage). Source written against a paginated shape reads `.has_more` off
+// an array and silently stops at the first page. Bounded to the clause — the
+// helper name through the next `brains.boards.` entry — because the rest of the
+// Boards bullet is an API inventory that moves for unrelated reasons; the helper
+// is counted so a second description cannot sit elsewhere.
+//
+// TO UPDATE: read the upstream diff, satisfy yourself the new wording is true of
+// what the server does, then replace AUTOMATION_BOARDS_LIST_CLAUSE.
+const AUTOMATION_BOARDS_LIST_CLAUSE =
+  '`brains.boards.list()` (ONE size-bounded page, as a bare array — no `has_more`; resolve a board by name with `brains.call("list_boards", {name})`)';
+const boardsListStart = automationSkillNormalized.indexOf("`brains.boards.list()`");
+const boardsListEnd = automationSkillNormalized.indexOf(", `brains.boards.", boardsListStart);
+assert(
+  automationSkillNormalized.split("brains.boards.list(").length === 2,
+  `brains-automation must describe brains.boards.list exactly once — found ${automationSkillNormalized.split("brains.boards.list(").length - 1} (regenerate upstream, re-read the change, then update AUTOMATION_BOARDS_LIST_CLAUSE)`,
+);
+assert(
+  boardsListStart > 0 && boardsListEnd > boardsListStart,
+  "brains-automation's Boards bullet must list `brains.boards.list()` before another `brains.boards.` helper — the slice below depends on it",
+);
+assert(
+  automationSkillNormalized.slice(boardsListStart, boardsListEnd) === AUTOMATION_BOARDS_LIST_CLAUSE,
+  "brains-automation's brains.boards.list clause must match the approved copy exactly — it is where an author learns the helper returns one bare page with no has_more (regenerate upstream, re-read the change, then update AUTOMATION_BOARDS_LIST_CLAUSE)",
 );
 
 // Rule 3 — the grant table's Send row, which states when `act_on_integration`
