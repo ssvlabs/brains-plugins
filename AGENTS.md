@@ -18,12 +18,12 @@ This repo publishes the brains plugin for Codex and Claude Code. README.md cover
 ## Branches, commits, review
 
 - Branch off `main` and open the PR against `main`; it cannot be pushed to directly.
-- `main` requires 1 approving review, signed commits and resolved review threads. A new push dismisses earlier approvals, and the last push needs approval from someone other than its pusher. Copilot reviews every push to a non-draft PR.
+- `main` requires 1 approving review, signed commits and resolved review threads. A new push dismisses earlier approvals, and the last push needs approval from someone other than its pusher.
 - Use conventional commit titles with a scope: `fix(brains): ...`, `feat(brains): ...`, `docs(tests): ...`. Recent plugin changes use scope `brains`. Nothing checks titles.
 
 ## Tests
 
-Bun 1.3.8 (the CI version) and Node 22. Run from the repo root:
+Bun 1.3.8 (the CI version), Node 22 and jq. The hooks parse with jq; without it every suite fails with errors that never name it. Fetch `origin/main`, then run from the repo root:
 
     bun run tests/plugin-contract/run.ts
     bun run tests/inbox-v2/run.ts
@@ -31,15 +31,15 @@ Bun 1.3.8 (the CI version) and Node 22. Run from the repo root:
     bun run tests/credential/run.ts
     bash scripts/generated-artifact-guard.sh origin/main
 
-- The guard compares committed history, so it refuses uncommitted changes to tracked files. Fetch `origin/main` first.
+- The guard compares committed history, so it refuses uncommitted changes to tracked files.
 - The contract test also runs `claude plugin validate --strict` and a Codex install check. Locally each is skipped with a note when that CLI is not on PATH; in CI the Claude check cannot be skipped.
-- README.md, core.md, the manifest descriptions and parts of the hooks and skills are pinned verbatim in `tests/plugin-contract/run.ts`. Changing that text means updating the pin in the same PR. Read the comment above the pin first; it records why the text is held.
+- `tests/plugin-contract/run.ts` pins README.md, core.md and parts of the hooks and skills verbatim, and both plugin manifests and both `marketplace.json` files whole. Only `version` is read from the files rather than pinned. Changing pinned text or adding any field means updating the pin in the same PR. The marketplace files sit outside `plugins/brains/`, so the guard never sees them and this test is their only gate. Read the comment above a pin first; it records why the text is held.
 - `tests/inbox-v2/live-claude.ts` and the two `demo-*.ts` scripts beside it drive a real, signed-in `claude -p`. They spend tokens, are non-deterministic and are not in CI; run them by hand.
 - Before asking for review on a hook change, run `scripts/mutation-coverage.sh origin/main`. It is slow and not in CI.
 
 ## Public repo
 
-This repo is public. Do not add internal hostnames or cluster names, ticket ids, paths in private repos, roadmap or status wording ("planned", "not yet live"), or secrets and tokens, not even as examples, to committed files. Use placeholders like `<your token>`. The generated headers naming their upstream generator are the one exception. Put ticket references and other traceability in the PR body. CI does not check this; review for it.
+This repo is public. Do not add internal hostnames or cluster names, ticket ids, paths in private repos, roadmap or status wording ("planned", "not yet live"), or secrets and tokens, not even as examples, to committed files. Use placeholders like `<your token>`. Existing references to the upstream generator and its paths, in the generated headers, the catalog, the guard and the contract test's comments, stay as they are: do not strip them, and do not add new ones by hand. Ticket references go in the PR title (in square brackets at the end, as recent PRs do) or the PR body, never in committed files. CI does not check this; review for it.
 
 ## Shipped code runs on users' machines
 
