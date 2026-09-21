@@ -39,7 +39,7 @@ Bun 1.3.8 (the CI version), Node 22 and jq. The hooks parse with jq; without it 
 
 ## Public repo
 
-This repo is public. Do not add internal hostnames or cluster names, ticket ids, paths in private repos, roadmap or status wording ("planned", "not yet live"), or secrets and tokens, not even as examples, to committed files. Use placeholders like `<your token>`. Existing references to the upstream generator and its paths, in the generated headers, the catalog, the guard and the contract test's comments, stay as they are: do not strip them, and do not add new ones by hand. Ticket references go in the PR title (in square brackets at the end, as recent PRs do) or the PR body, never in committed files. CI does not check this; review for it.
+This repo is public. Do not add internal hostnames or cluster names, ticket ids, paths in private repos, roadmap or status wording ("planned", "not yet live"), or secrets and tokens, not even as examples, to committed files. Use placeholders like `<your token>`. Existing references to the upstream generator and its paths, in the generated headers, the catalog, the guard and the contract test, stay as they are: do not strip them, and do not add new ones by hand. Ticket references go in the PR title (in square brackets at the end, as recent PRs do) or the PR body. Do not add them to committed files; the one in the guard's header predates this rule and stays. CI does not check this; review for it.
 
 ## Shipped code runs on users' machines
 
