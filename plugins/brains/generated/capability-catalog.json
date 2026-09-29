@@ -7,9 +7,9 @@
   "artifacts": [
     {
       "capability_id": "integration-actions",
-      "catalog_sha256": "e94fde67a170e31bc3f7fa7ba245cd55a497caa4f437859dfb633916bb043293",
+      "catalog_sha256": "6f0d1845064970b89e9e623e838314f57fe4c77393637224720f36fe48dbf2be",
       "artifact_path": "plugins/brains/skills/brains-write/SKILL.md",
-      "artifact_sha256": "c289803f96c35dcfd5347e46177c009850dfdc4b42579a770ea6516d0c60e2af"
+      "artifact_sha256": "90c939a5d8358dee74a8a1d4e30ea1950e3ad786f746bd49d078d4516f06876e"
     },
     {
       "capability_id": "brains-features",
@@ -36,5 +36,5 @@
       "artifact_sha256": "3e95e12643ff463594f7ac1ffc8ad7a0120011e20d789bf5921db16d6059b153"
     }
   ],
-  "source_commit": "649baf451bec650f7038640362636d8809710f68"
+  "source_commit": "fcc4526eb03cb6d88d270651daac26c7711f1bc8"
 }
