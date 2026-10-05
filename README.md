@@ -37,13 +37,15 @@ keep. Confirm with `codex mcp list`: brains should read **OAuth**.
 Restart the ChatGPT desktop app or start a new Codex thread. The first time the
 plugin loads, open `/hooks` and trust the bundled brains hooks — that is what
 runs automatic recall and error feedback. Capture and inbox delivery use the
-sign-in above as their credential, so there is nothing further to set.
+sign-in above wherever they can read it; the next paragraph says where that is.
 
-Capture and the inbox are **macOS only** for Codex: they read the sign-in from
-the macOS keychain, so on Linux there is none for them to read and they stay
-off. The tools and recall are unaffected. The optional capture token below does
-drive capture there, but Codex on Linux is not a configuration brains supports
-or tests.
+Capture and the inbox read the brains sign-in only from Codex's credentials file
+(`.credentials.json` under `CODEX_HOME`, `~/.codex` by default). Codex keeps MCP
+sign-ins in the system keychain by default, and brains does not read the
+keychain from a hook because that can raise a password prompt — so with the
+default store capture and the inbox stay off, and the plugin says so once. The
+tools and recall are unaffected. Codex on Linux is not a configuration brains
+supports or tests.
 
 Everyday reading and writing is covered by default. For admin-gated tools or
 performance insights, sign in asking for them explicitly (both also need the
@@ -64,10 +66,9 @@ codex mcp login brains
 
 ### Optional: an explicit capture token
 
-You do not need this. Capture and the inbox read the credential `codex mcp login
-brains` already stored, so the sign-in above is all they need. To check what has
-been captured, ask brains which chats it has, or run
-`list_pages type=chat_session`.
+Capture and the inbox use the sign-in above wherever they can read it, and then
+need nothing else. To check what has been captured, ask brains which chats it
+has, or run `list_pages type=chat_session`.
 
 Set a token to capture into a different brains account, or to reach an endpoint
 your sign-in does not cover — find it in your brains account settings:

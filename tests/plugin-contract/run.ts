@@ -360,17 +360,18 @@ const CODEX_INSTALL_REGION = [
   "Restart the ChatGPT desktop app or start a new Codex thread. The first time the",
   "plugin loads, open `/hooks` and trust the bundled brains hooks — that is what",
   "runs automatic recall and error feedback. Capture and inbox delivery use the",
-  "sign-in above as their credential, so there is nothing further to set.",
+  "sign-in above wherever they can read it; the next paragraph says where that is.",
   "",
-  // "capture and inbox delivery do not [work there]" was false: the explicit-token
-  // branch is platform independent and captures on Linux exactly as on macOS. The
-  // product decision stands — what changed is that the copy now says which part
-  // is unavailable (the sign-in) rather than claiming the feature is.
-  "Capture and the inbox are **macOS only** for Codex: they read the sign-in from",
-  "the macOS keychain, so on Linux there is none for them to read and they stay",
-  "off. The tools and recall are unaffected. The optional capture token below does",
-  "drive capture there, but Codex on Linux is not a configuration brains supports",
-  "or tests.",
+  // The hooks read Codex's credentials file and never its keychain entry, so the
+  // copy says where the sign-in is read from rather than promising capture to
+  // every signed-in user.
+  "Capture and the inbox read the brains sign-in only from Codex's credentials file",
+  "(`.credentials.json` under `CODEX_HOME`, `~/.codex` by default). Codex keeps MCP",
+  "sign-ins in the system keychain by default, and brains does not read the",
+  "keychain from a hook because that can raise a password prompt — so with the",
+  "default store capture and the inbox stay off, and the plugin says so once. The",
+  "tools and recall are unaffected. Codex on Linux is not a configuration brains",
+  "supports or tests.",
   "",
   "Everyday reading and writing is covered by default. For admin-gated tools or",
   "performance insights, sign in asking for them explicitly (both also need the",
@@ -401,10 +402,9 @@ const CODEX_INSTALL_REGION = [
 const CODEX_OPTIONAL_REGION = [
   "### Optional: an explicit capture token",
   "",
-  "You do not need this. Capture and the inbox read the credential `codex mcp login",
-  "brains` already stored, so the sign-in above is all they need. To check what has",
-  "been captured, ask brains which chats it has, or run",
-  "`list_pages type=chat_session`.",
+  "Capture and the inbox use the sign-in above wherever they can read it, and then",
+  "need nothing else. To check what has been captured, ask brains which chats it",
+  "has, or run `list_pages type=chat_session`.",
   "",
   "Set a token to capture into a different brains account, or to reach an endpoint",
   "your sign-in does not cover — find it in your brains account settings:",
@@ -2832,28 +2832,23 @@ const INBOX_SOURCES_RESOLVER_REGION = [
 // before it was a pin. The separator is hoisted and the fork-free predicate is
 // tested first, because two command substitutions per entry cost seconds on a
 // store the document ceiling now admits. The loop consults the total budget, so
-// the ceiling cannot make it unbounded. And a non-matching row may only discard
-// a record file PRIVATE to it — keyed on shared-ness, not on the client, since
-// the client check let the array backend delete the snapshot every row shares.
+// the ceiling cannot make it unbounded. And no row discards anything: every row
+// names the one store snapshot, which the winner still needs.
 const RESOLVER_SELECTION_REGION = [
   "  tab=$(printf '\\t')",
-  "  while IFS=\"$tab\" read -r key url name recfile; do",
+  "  while IFS=\"$tab\" read -r key url name; do",
   "    [ -n \"$key\" ] || continue",
   "    BRAINS_CRED_SAW_ENTRIES=1",
   "    if ! _brains_budget_left; then",
   "      BRAINS_CRED_TRUNCATED=1",
-  "      [ \"$recfile\" != \"${store:-}\" ] && _brains_discard \"$recfile\"",
   "      continue",
   "    fi",
   "    if ! _brains_is_brains_server \"$name\" ||",
   "       ! corigin=$(brains_origin \"$url\") ||",
   "       [ \"$corigin\" != \"$want\" ]; then",
-  "      [ \"$recfile\" != \"${store:-}\" ] && _brains_discard \"$recfile\"",
   "      continue",
   "    fi",
   "    matched=\"$matched$key",
-  "\"",
-  "    matchedfiles=\"$matchedfiles$recfile",
   "\"",
   "    count=$((count + 1))",
   "  done <<EOF2",
@@ -2864,7 +2859,7 @@ const RESOLVER_SELECTION_REGION = [
 const RESOLVER_DECISION_REGION = [
   "  if [ \"$BRAINS_CRED_TRUNCATED\" = \"1\" ]; then",
   "    BRAINS_CRED_STATE=\"indeterminate\"",
-  "    _brains_discard \"${store:-}\"; _brains_discard_matched",
+  "    _brains_discard \"${store:-}\"",
   "    return 1",
   "  fi",
   "  if [ \"$count\" -eq 0 ]; then",
@@ -2873,12 +2868,12 @@ const RESOLVER_DECISION_REGION = [
   "    else",
   "      BRAINS_CRED_STATE=\"no-credential\"",
   "    fi",
-  "    _brains_discard \"${store:-}\"; _brains_discard_matched",
+  "    _brains_discard \"${store:-}\"",
   "    return 1",
   "  fi",
   "  if [ \"$count\" -gt 1 ]; then",
   "    BRAINS_CRED_STATE=\"indeterminate\"",
-  "    _brains_discard \"${store:-}\"; _brains_discard_matched",
+  "    _brains_discard \"${store:-}\"",
   "    return 1",
   "  fi",
   "  key=\"${matched%%",
@@ -3027,8 +3022,15 @@ try {
     join(bin, "curl"),
     '#!/bin/sh\n[ "${SLOW_CAPTURE:-}" = "1" ] && sleep 0.2\nprev=""\nfor arg in "$@"; do\n  if [ "$prev" = "-d" ]; then printf \'%s\\n\' "$arg" >> "$CAPTURE_FILE"; fi\n  case "$arg" in\n    http://*|https://*) [ -n "${URL_FILE:-}" ] && printf \'%s\\n\' "$arg" >> "$URL_FILE" ;;\n  esac\n  prev="$arg"\ndone\nprintf \'%s\\n%s\' "${FAKE_BODY:-}" "${FAKE_CODE:-200}"\n',
   );
+  // On Codex no hook may run `security` at all; this one records any call.
+  const securityLog = join(temp, "security-argv.log");
+  writeFileSync(
+    join(bin, "security"),
+    `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(securityLog)}\nexit 1\n`,
+  );
   chmodSync(join(bin, "codex"), 0o755);
   chmodSync(join(bin, "curl"), 0o755);
+  chmodSync(join(bin, "security"), 0o755);
 
   // core.md's copy is pinned above; this proves it is DELIVERED. Deleting brains-start.sh's
   // `cat "$CORE_MD"` line passed all three suites — SessionStart is the core prompt's ONLY delivery
@@ -3068,10 +3070,10 @@ try {
       BRAINS_INBOX_TOKEN: "",
       CLAUDE_PLUGIN_OPTION_TOKEN: "",
       // Hermetic without disabling discovery: these two scenarios EXERCISE the header
-      // scavenge, so the blanket switch would make them vacuous. Pointing the store reads at a
-      // path that does not exist keeps a real developer keychain out of them just as firmly.
+      // scavenge, so the blanket switch would make them vacuous. Pointing the store reads at
+      // paths that do not exist keeps a real developer credential out of them just as firmly.
       BRAINS_CLAUDE_CREDENTIALS_FILE: join(temp, "no-such-store.json"),
-      BRAINS_CODEX_CREDENTIALS_FILE: join(temp, "no-such-store.json"),
+      CODEX_HOME: join(temp, "no-such-codex-home"),
       BRAINS_STATE_DIR: join(temp, "state"),
       CAPTURE_FILE: capture,
     },
@@ -3104,10 +3106,10 @@ try {
       BRAINS_INBOX_TOKEN: "",
       CLAUDE_PLUGIN_OPTION_TOKEN: "",
       // Hermetic without disabling discovery: these two scenarios EXERCISE the header
-      // scavenge, so the blanket switch would make them vacuous. Pointing the store reads at a
-      // path that does not exist keeps a real developer keychain out of them just as firmly.
+      // scavenge, so the blanket switch would make them vacuous. Pointing the store reads at
+      // paths that do not exist keeps a real developer credential out of them just as firmly.
       BRAINS_CLAUDE_CREDENTIALS_FILE: join(temp, "no-such-store.json"),
-      BRAINS_CODEX_CREDENTIALS_FILE: join(temp, "no-such-store.json"),
+      CODEX_HOME: join(temp, "no-such-codex-home"),
       BRAINS_STATE_DIR: join(temp, "state"),
       CAPTURE_FILE: assistantCapture,
       SLOW_CAPTURE: "1",
@@ -3184,47 +3186,23 @@ try {
     firstSignal.includes("<!-- brains:capture -->"),
     "inbox engine must announce the off-state once at session start",
   );
-  // The remedy is PER PLATFORM, so the assertion has to be too. Codex reads its
-  // sign-in from the macOS keychain and Codex on Linux is not supported, so
-  // there the note must say so and name nothing — an assertion that accepted
-  // any string, or that only ever looked for "mcp login", would pass on the
-  // wrong text for one of the two platforms.
-  const codexKeychainHere = spawnSync("sh", ["-c", "command -v security"], {
-    env: noTokenEnv,
-  }).status === 0;
-  if (codexKeychainHere) {
-    assert(
-      firstSignal.includes("codex mcp login brains"),
-      "on a host with the macOS keychain the Codex off-state must name the sign-in that fixes it",
-    );
-    assert(
-      !/not support/i.test(firstSignal),
-      "…and must not claim the platform is unsupported",
-    );
-  } else {
-    assert(
-      /reads the Codex sign-in from the macOS keychain/.test(firstSignal) &&
-        /not a configuration brains supports/.test(firstSignal),
-      "without the macOS keychain the Codex off-state must say why the sign-in cannot be read",
-    );
-    assert(
-      !/mcp login/.test(firstSignal),
-      "…and must name no sign-in step, because there is none to read on this platform",
-    );
-    // It must not say there is nothing to change, either. BRAINS_API_TOKEN
-    // resolves and captures here — the branch is platform independent — so the
-    // old wording was false in a note core.md tells the agent is authoritative.
-    assert(
-      !/nothing to change/.test(firstSignal),
-      "…and must not claim nothing would change it, which is measurably false",
-    );
-    // No action, so no offer protocol: a note that says there is nothing to do
-    // and then tells the agent to offer it leaves the agent to invent one.
-    assert(
-      !/Offer this to the user/.test(firstSignal) && /nothing for you to offer/.test(firstSignal),
-      "…and a note with no action must not carry the offer tail",
-    );
-  }
+  // One text on every host: the Codex note explains where the sign-in is read
+  // from and names no step, because signing in does not turn capture on.
+  assert(
+    firstSignal.includes("brains reads the Codex sign-in for brains only from Codex's credentials file") &&
+      firstSignal.includes("brains does not read the keychain from a hook"),
+    "the Codex off-state must say where the sign-in is read from and why the keychain is not",
+  );
+  assert(
+    !/mcp login/.test(firstSignal),
+    "…and must name no sign-in step, because signing in does not turn capture on",
+  );
+  // No action, so no offer protocol: a note that says there is nothing to do
+  // and then tells the agent to offer it leaves the agent to invent one.
+  assert(
+    !/Offer this to the user/.test(firstSignal) && /nothing for you to offer/.test(firstSignal),
+    "…and a note with no action must not carry the offer tail",
+  );
   const secondSignal = spawnSync(
     "bash",
     [join(PLUGIN, "hooks", "lib", "brains-inbox.sh"), "startup", "codex-session-2"],
@@ -3233,6 +3211,11 @@ try {
   assert(
     !secondSignal.stdout.toString().includes("<!-- brains:capture -->"),
     "the off-state signal must be claimed once per episode, not repeated every session",
+  );
+  assert(
+    spawnSync("sh", ["-c", "command -v security"], { env: noTokenEnv }).stdout.toString().trim() ===
+      join(bin, "security") && !existsSync(securityLog),
+    "no Codex hook run may invoke `security`",
   );
 
   // The MCP URL is a literal now, so `userConfig.endpoint` governs capture and the inbox and

@@ -58,6 +58,9 @@ function section(title: string): void {
 
 const temp = mkdtempSync(join(tmpdir(), "brains-credential-"));
 const stateSeq = { n: 0 };
+// No call may reach a real ~/.codex: Codex's own variable points at nothing.
+const EMPTY_CODEX_HOME = join(temp, "codex-home-empty");
+mkdirSync(EMPTY_CODEX_HOME);
 function freshState(): string {
   const dir = join(temp, `state-${++stateSeq.n}`);
   mkdirSync(dir, { recursive: true });
@@ -83,6 +86,7 @@ function sh(script: string, opts: ShellOpts = {}): { stdout: string; stderr: str
     BRAINS_API_TOKEN: "",
     BRAINS_INBOX_TOKEN: "",
     BRAINS_STATE_DIR: opts.state ?? freshState(),
+    CODEX_HOME: EMPTY_CODEX_HOME,
     ...(opts.env ?? {}),
   };
   // A hard per-call ceiling. Nothing here should take seconds, and a test suite that
@@ -152,6 +156,69 @@ function storeFor(url: string, token = "tok-primary"): string {
   });
 }
 const PRIMARY_STORE = storeFor(`${ORIGIN}/mcp`);
+
+// The environment every Codex check runs in, pinned rather than inherited: no
+// explicit token, discovery on, private state / HOME / CODEX_HOME, and first on
+// PATH a `security` that records its argv and a `codex` that exits 1 so the
+// header lookup cannot reach a real Codex. Discovery left off, or a token left
+// set, returns before the store is ever looked at — and "security was never
+// run" would then pass against a resolver that still runs it.
+type CodexRig = {
+  env: Record<string, string>;
+  state: string;
+  home: string;          // CODEX_HOME
+  bin: string;
+  securityCalls: () => string[];
+};
+const codexEntry = (token: string, url = `${ORIGIN}/mcp`, name = "brains") =>
+  ({ server_name: name, server_url: url, client_id: "client", access_token: token, scopes: [] });
+const rigSeq = { n: 0 };
+// `store` is the body of $CODEX_HOME/.credentials.json: an object is written as
+// JSON, a string verbatim, and undefined leaves the file absent.
+function codexRig(store?: unknown): CodexRig {
+  const root = join(temp, `codex-rig-${++rigSeq.n}`);
+  const bin = join(root, "bin");
+  const home = join(root, "codex-home");
+  const log = join(root, "security-argv.log");
+  for (const dir of [bin, home, join(root, "home")]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(bin, "security"), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 1\n`);
+  writeFileSync(join(bin, "codex"), "#!/bin/sh\nexit 1\n");
+  chmodSync(join(bin, "security"), 0o755);
+  chmodSync(join(bin, "codex"), 0o755);
+  if (store !== undefined) {
+    writeFileSync(join(home, ".credentials.json"), typeof store === "string" ? store : JSON.stringify(store));
+  }
+  const state = freshState();
+  return {
+    env: {
+      CLAUDE_PLUGIN_OPTION_TOKEN: "", BRAINS_API_TOKEN: "", BRAINS_INBOX_TOKEN: "",
+      BRAINS_ENDPOINT: ORIGIN,
+      BRAINS_CREDENTIAL_STORE_DISABLED: "",
+      BRAINS_STATE_DIR: state,
+      HOME: join(root, "home"),
+      CODEX_HOME: home,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+    },
+    state, home, bin,
+    securityCalls: () =>
+      existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((l) => l !== "") : [],
+  };
+}
+// Resolve as Codex and, when it resolves, send one request so the bearer that
+// was actually selected shows up in the stub's receipts.
+function codexResolve(rig: CodexRig, pre = ""): { out: string; auth: string; status: number; stderr: string } {
+  const mark = readHits().length;
+  const r = sh(
+    `${pre}BRAINS_CRED_CLIENT=codex\n` +
+      `if brains_resolve_credential ${JSON.stringify(ORIGIN)}; then\n` +
+      `  brains_request ingest "${ORIGIN}/ingest/claude" -X POST -d '{}'\n` +
+      `  printf '%s|%s|%s' "$BRAINS_CRED_STATE" "$BRAINS_CRED_SOURCE" "$BRAINS_CRED_COUNT"\n` +
+      `else printf '%s|%s|%s' "$BRAINS_CRED_STATE" "$BRAINS_CRED_SOURCE" "$BRAINS_CRED_COUNT"; fi`,
+    { state: rig.state, env: rig.env },
+  );
+  const hit = readHits().slice(mark).find((h) => h.path === "/ingest/claude");
+  return { out: r.stdout, auth: hit?.auth ?? "", status: r.status, stderr: r.stderr };
+}
 
 // =============================================================== canonicalization
 section("origin canonicalization — the comparison every binding decision rests on");
@@ -587,39 +654,77 @@ section("the off-state signal — once per cause, cleared only by an observed su
   check("an unreachable endpoint raises no signal at all", r.stdout.trim() === "", r.stdout);
 }
 {
-  // The remedy has to be platform-aware as well as cause-aware. Codex storage
-  // on Linux is unverified, so the hooks do not read it there — telling a
-  // signed-in Linux user to sign in again is a step they can repeat forever
-  // without changing anything. `security` absent stands in for "not macOS".
+  // A PATH with everything the library needs except `security`, standing in
+  // for a host with no keychain tool.
   const noSecurity = join(temp, "no-security-bin");
   mkdirSync(noSecurity, { recursive: true });
   for (const bin of ["curl", "jq", "shasum", "sleep", "find", "wc", "head", "tr", "sort", "awk", "mkdir", "rmdir", "rm", "cat", "id", "date", "cut", "mv", "grep", "sed", "printf", "bash", "sh", "env", "ls", "touch"]) {
     const which = spawnSync("bash", ["-c", `command -v ${bin} || true`], { encoding: "utf8" }).stdout.trim();
     if (which) writeFileSync(join(noSecurity, bin), `#!/bin/sh\nexec ${which} "$@"\n`), chmodSync(join(noSecurity, bin), 0o755);
   }
-  const state = freshState();
-  const r = sh(
-    `BRAINS_CRED_CLIENT=codex\nbrains_resolve_endpoints "${ORIGIN}"\nbrains_health_note ingest "$BRAINS_URL_INGEST" no-credential\nbrains_capture_signal`,
-    { state, env: { PATH: noSecurity } },
-  );
-  // Codex on Linux is not a supported configuration, so the note names no
-  // sign-in step — there is none to read there. What it must NOT do is claim
-  // there is nothing to change: the explicit-token branch is platform
-  // independent and does capture on Linux, which made the old wording
-  // measurably false in a note core.md tells the agent is authoritative.
-  check("a Codex host without the macOS keychain is told why the sign-in cannot be read",
-    r.stdout.includes("reads the Codex sign-in from the macOS keychain") &&
-    r.stdout.includes("not a configuration brains supports"), r.stdout.trim().slice(0, 200));
-  check("...and is not told that nothing would change it, which is false",
-    !r.stdout.includes("nothing to change"), r.stdout.trim().slice(0, 200));
-  check("...and names no sign-in step, because there is none to name here",
-    !r.stdout.includes("mcp login"), r.stdout.trim().slice(0, 200));
-  // A note with no action must not carry the offer protocol. Ending "offer this
-  // and act if they say yes" on a state with nothing to offer is a contradiction
-  // the agent resolves by inventing a command.
-  check("...and a note with no action does not invite the agent to offer one",
-    !r.stdout.includes("Offer this to the user") && r.stdout.includes("nothing for you to offer"),
-    r.stdout.trim().slice(0, 200));
+  // On Codex no note names a step. brains reads the sign-in only from Codex's
+  // credentials file while Codex signs in to the system keychain by default, so
+  // "sign in" is a step the user can repeat forever without changing anything.
+  // The text is pinned whole, and is the same on a host with and without
+  // `security`: nothing about the note depends on the platform.
+  const TAIL = " There is nothing for you to offer here. Say it once if it is relevant and do not repeat it later in the session.<!-- /brains:capture -->";
+  const NOTES: Array<[string, string, string, string]> = [
+    ["no-credential", "ingest", "Conversation capture and the brains inbox",
+      "no capture credential resolved. brains reads the Codex sign-in for brains only from Codex's credentials file (`.credentials.json` under `CODEX_HOME`, `~/.codex` by default), and Codex keeps MCP sign-ins in the system keychain by default. brains does not read the keychain from a hook, because that can raise a password prompt."],
+    ["indeterminate", "ingest", "Conversation capture and the brains inbox",
+      "brains could not determine which stored Codex sign-in belongs to this endpoint — more than one may match it, or the store could not be read in full."],
+    ["blocked", "ingest", "Conversation capture",
+      "this endpoint is a different host from the brains server you are signed into, so the stored credential was not used."],
+    ["blocked", "inbox", "The brains inbox",
+      "this endpoint is a different host from the brains server you are signed into, so the stored credential was not used."],
+    ["rejected", "ingest", "Conversation capture", "the capture credential was refused by the server."],
+    ["rejected", "inbox", "The brains inbox", "the capture credential was refused by the server."],
+  ];
+  const signal = (rig: CodexRig, notes: string, env = rig.env) => sh(
+    `BRAINS_CRED_CLIENT=codex\nbrains_resolve_endpoints "${ORIGIN}"\n${notes}brains_capture_signal`,
+    { state: rig.state, env },
+  ).stdout.trim();
+  const noteFor = (st: string, cap: string) =>
+    `brains_health_note ${cap} "$BRAINS_URL_${cap === "ingest" ? "INGEST" : "INBOX"}" ${st}\n`;
+  for (const [st, cap, label, text] of NOTES) {
+    const rig = codexRig();
+    const got = signal(rig, noteFor(st, cap));
+    const want = `<!-- brains:capture -->${label} is OFF: ${text}${TAIL}`;
+    check(`the Codex ${st} note for ${cap} is the exact no-remedy text`, got === want, got.slice(0, 200));
+    check("...and names no command, option or token, and carries no offer",
+      !/mcp login|`token` option|BRAINS_API_TOKEN|Offer this to the user/.test(got) &&
+      got.includes("nothing for you to offer"), got.slice(0, 200));
+    check("...and `security` was never run", rig.securityCalls().length === 0, rig.securityCalls().join(" / "));
+  }
+  {
+    const rig = codexRig();
+    const withSecurity = signal(rig, noteFor("no-credential", "ingest"));
+    const bare = codexRig();
+    const without = signal(bare, noteFor("no-credential", "ingest"), { ...bare.env, PATH: noSecurity });
+    check("the Codex no-credential note is identical with and without `security` on PATH",
+      withSecurity !== "" && withSecurity === without, `${withSecurity.slice(0, 80)} vs ${without.slice(0, 80)}`);
+  }
+  {
+    // Once per cause, and re-armed only by an observed success.
+    const rig = codexRig();
+    const first = signal(rig, noteFor("no-credential", "ingest"));
+    const second = signal(rig, "");
+    signal(rig, `g=$(brains_health_begin ingest "$BRAINS_URL_INGEST"); brains_health_apply ingest "$BRAINS_URL_INGEST" "$g" ok\n`);
+    const again = signal(rig, noteFor("no-credential", "ingest"));
+    check("the Codex no-credential note is claimed once and released by an observed success",
+      first.includes("is OFF") && second === "" && again === first, `${second} / ${again.slice(0, 80)}`);
+  }
+  {
+    // A refusal already announced for capture must not swallow a different
+    // cause on the inbox: with no step to name, the rejected arm used to return
+    // instead of falling through to the next capability.
+    const rig = codexRig();
+    signal(rig, noteFor("rejected", "ingest"));
+    const next = signal(rig, noteFor("blocked", "inbox"));
+    check("after a Codex capture refusal is announced, a blocked inbox is still announced",
+      next.startsWith("<!-- brains:capture -->The brains inbox is OFF: this endpoint is a different host"),
+      next.slice(0, 160) || "(nothing)");
+  }
 }
 {
   // The claim the note above must stay consistent with: that same host DOES
@@ -796,30 +901,6 @@ section("network calls are bounded — no call site can opt out");
     /brains_request ingest [^\n]*--max-time/.test(readFileSync(TURN, "utf8")));
 }
 
-// =============================================================== aggregate budget
-section("one budget for the whole resolution, not one per read");
-{
-  // Per-read deadlines do not compose. The Codex store is enumerated one
-  // account at a time, so N stale entries would otherwise cost N x the
-  // per-read deadline — twice per prompt, since the turn hook and the inbox
-  // engine each resolve independently.
-  const budgetBin = join(temp, "budget-bin");
-  mkdirSync(budgetBin, { recursive: true });
-  const accounts = 40;
-  writeFileSync(join(budgetBin, "security"),
-    `#!/bin/sh\nif [ "$1" = "dump-keychain" ]; then\n  i=0\n  while [ $i -lt ${accounts} ]; do\n    printf '    "acct"<blob>="brains|%s"\\n' "$i"\n    printf '    "svce"<blob>="Codex MCP Credentials"\\n'\n    i=$((i+1))\n  done\n  exit 0\nfi\nsleep 30\n`);
-  chmodSync(join(budgetBin, "security"), 0o755);
-  const started = Date.now();
-  const r = sh(
-    `BRAINS_CRED_CLIENT=codex\n` +
-      `if brains_resolve_credential ${JSON.stringify(ORIGIN)}; then printf 'RESOLVED'; else printf 'none'; fi`,
-    { env: { PATH: `${budgetBin}:${process.env.PATH ?? ""}` } },
-  );
-  const elapsed = Date.now() - started;
-  check(`${accounts} hanging Codex accounts stay within the aggregate budget`,
-    r.stdout === "none" && elapsed < 12000, `${r.stdout} in ${elapsed}ms`);
-}
-
 // =============================================================== health namespace
 section("health is scoped to the endpoint, not just the capability");
 {
@@ -855,65 +936,90 @@ section("health is scoped to the endpoint, not just the capability");
   void okStore;
 }
 
-// =============================================================== truncation
-section("an incomplete enumeration means 'I do not know', never 'here is what I found'");
+// =============================================================== the Codex file store
+section("Codex: the credentials file is the only store read, and never the keychain");
 {
-  // A cap that stops early and hands back the first match silently breaks
-  // exactly-one-or-nothing: a second matching account past the cutoff is
-  // invisible, and the first gets returned as uniquely valid. That is how a
-  // conversation ends up captured into the wrong account, with no error.
-  const codexBin = join(temp, "trunc-bin");
-  mkdirSync(codexBin, { recursive: true });
-  const dump = (server: string, count: number) =>
-    `  i=0\n  while [ $i -lt ${count} ]; do\n    printf '    "acct"<blob>="${server}|%s"\\n' "$i"\n    printf '    "svce"<blob>="Codex MCP Credentials"\\n'\n    i=$((i+1))\n  done\n`;
-  const resolveCodex = `BRAINS_CRED_CLIENT=codex\nif brains_resolve_credential ${JSON.stringify(ORIGIN)}; then printf 'RESOLVED|%s|%s' "$BRAINS_CRED_STATE" "$BRAINS_CRED_TRUNCATED"; else printf 'none|%s|%s' "$BRAINS_CRED_STATE" "$BRAINS_CRED_TRUNCATED"; fi`;
+  // One row per outcome. `out` is state|source|count; `auth` is the bearer the
+  // stub received, which is the only proof of WHICH entry was sent. Every row
+  // also requires that `security` was never run: the keychain read these
+  // replaced raised a password prompt from a background hook.
+  const other = `http://127.0.0.1:${OTHER}/mcp`;
+  // Codex names an executor-owned sign-in executor:<base64url(env)>:<base64url(server)>
+  // and keys it with `:`; "YnJhaW5z" is "brains". It is not the host's sign-in.
+  const executorName = "executor:ZW52LTE:YnJhaW5z";
+  const executor = { ...codexEntry("tok-executor", `${ORIGIN}/mcp`, executorName), executor_owned: true };
+  const others: Record<string, unknown> = {};
+  for (let i = 0; i < 40; i++) others[`other-${i}|00000000000000${String(i).padStart(2, "0")}`] = codexEntry(`tok-other-${i}`, `${ORIGIN}/mcp`, `other-${i}`);
+  const rows: Array<[string, unknown, string, string]> = [
+    ["one matching entry", { "brains|0123456789abcdef": codexEntry("tok-one") }, "ok|codex-oauth|1", "Bearer tok-one"],
+    ["several matching entries holding one token",
+      { "brains|aaaaaaaaaaaaaaaa": codexEntry("tok-same"), "brains|bbbbbbbbbbbbbbbb": codexEntry("tok-same") },
+      "ok|codex-oauth|1", "Bearer tok-same"],
+    ["several matching entries holding different tokens",
+      { "brains|aaaaaaaaaaaaaaaa": codexEntry("tok-a"), "brains|bbbbbbbbbbbbbbbb": codexEntry("tok-b") },
+      "indeterminate||2", ""],
+    ["no credentials file", undefined, "no-credential||0", ""],
+    ["only other servers' entries", others, "no-credential||0", ""],
+    ["a brains entry with an empty token", { "brains|0123456789abcdef": codexEntry("") }, "no-credential||0", ""],
+    ["brains entries for another origin only", { "brains|0123456789abcdef": codexEntry("tok-elsewhere", other) }, "blocked||0", ""],
+    ["a brains entry among forty for other servers",
+      { ...others, "brains|0123456789abcdef": codexEntry("tok-among") }, "ok|codex-oauth|1", "Bearer tok-among"],
+    ["a brains entry beside one with an empty token",
+      { "brains|aaaaaaaaaaaaaaaa": codexEntry(""), "brains|bbbbbbbbbbbbbbbb": codexEntry("tok-full") },
+      "ok|codex-oauth|1", "Bearer tok-full"],
+    // The exact server-name match is what keeps an executor's sign-in out: it
+    // neither competes with the host entry nor reads as "signed in elsewhere".
+    ["an executor-owned entry beside the host entry",
+      { [`${executorName}:fedcba9876543210`]: executor, "brains|0123456789abcdef": codexEntry("tok-host") },
+      "ok|codex-oauth|1", "Bearer tok-host"],
+    ["an executor-owned entry alone", { [`${executorName}:fedcba9876543210`]: executor }, "no-credential||0", ""],
+    // Codex rewrites the file in place, so a read can land mid-write. None of
+    // these is an empty store, and none may be reported as one.
+    ["a zero-length file", "", "indeterminate||0", ""],
+    ["a whitespace-only file", " \n\t\n", "indeterminate||0", ""],
+    ["two JSON documents", `${JSON.stringify({ "brains|0123456789abcdef": codexEntry("tok-two") })}\n{}`, "indeterminate||0", ""],
+    ["a top-level array", [codexEntry("tok-array")], "indeterminate||0", ""],
+    ["a top-level string", JSON.stringify("brains"), "indeterminate||0", ""],
+    ["truncated JSON", '{"brains|0123456789abcdef":{"server_name":"brains","access_token":"tok-cut', "indeterminate||0", ""],
+  ];
+  for (const [label, store, want, auth] of rows) {
+    const rig = codexRig(store);
+    const r = codexResolve(rig);
+    check(`${label}: ${want.split("|")[0]}`, r.out === want && r.auth === auth, `out=${r.out} auth=${r.auth || "(none)"}`);
+    check("...and `security` was never run", rig.securityCalls().length === 0, rig.securityCalls().join(" / "));
+  }
+  {
+    const rig = codexRig();
+    const which = sh("command -v security", { env: rig.env }).stdout.trim();
+    check("the `security` those rows could have run is the recording fake, not the real one",
+      which === join(rig.bin, "security"), which);
+  }
 
-  // 12 matching accounts against a cap of 8, each with a DIFFERENT valid token.
-  writeFileSync(join(codexBin, "security"),
-    `#!/bin/sh\nif [ "$1" = "dump-keychain" ]; then\n${dump("brains", 12)}  exit 0\nfi\nprintf '{"server_name":"brains","url":"${ORIGIN}/mcp","token_response":{"access_token":"tok-'"$5"'"}}'\n`);
-  chmodSync(join(codexBin, "security"), 0o755);
-  const truncated = sh(resolveCodex, { env: { PATH: `${codexBin}:${process.env.PATH ?? ""}` } });
-  check("a truncated scan refuses instead of returning the first match",
-    truncated.stdout === "none|indeterminate|1", truncated.stdout);
-
-  // 40 accounts for OTHER servers plus one for ours: narrowing by server name
-  // before any keychain read is what keeps the cap from binding in practice.
-  writeFileSync(join(codexBin, "security"),
-    `#!/bin/sh\nif [ "$1" = "dump-keychain" ]; then\n${dump("other-server", 40)}  printf '    "acct"<blob>="brains|only"\\n'\n  printf '    "svce"<blob>="Codex MCP Credentials"\\n'\n  exit 0\nfi\nprintf '{"server_name":"brains","url":"${ORIGIN}/mcp","token_response":{"access_token":"tok-only"}}'\n`);
-  chmodSync(join(codexBin, "security"), 0o755);
-  const narrowed = sh(resolveCodex, { env: { PATH: `${codexBin}:${process.env.PATH ?? ""}` } });
-  check("accounts for other servers never consume the candidate budget",
-    narrowed.stdout === "RESOLVED|ok|0", narrowed.stdout);
-
-  // An account that cannot be READ is the same hazard as one past the cutoff:
-  // it is a targeted candidate for this server, so it may hold a different
-  // credential, and returning the readable one as uniquely valid is the
-  // exactly-one-or-nothing violation by another route. Note the account arrives
-  // as $5 — the call is `-s <service> -a <account> -w`.
-  const twoAccounts = `if [ "$1" = "dump-keychain" ]; then\n  printf '    "acct"<blob>="brains|good"\\n'\n  printf '    "svce"<blob>="Codex MCP Credentials"\\n'\n  printf '    "acct"<blob>="brains|second"\\n'\n  printf '    "svce"<blob>="Codex MCP Credentials"\\n'\n  exit 0\nfi\ncase "$5" in\n  'brains|good') printf '{"server_name":"brains","url":"${ORIGIN}/mcp","token_response":{"access_token":"tok-good"}}' ;;\n`;
-  const secondAccount = (behaviour: string) => {
-    writeFileSync(join(codexBin, "security"), `#!/bin/sh\n${twoAccounts}  'brains|second') ${behaviour} ;;\nesac\n`);
-    chmodSync(join(codexBin, "security"), 0o755);
-    return sh(resolveCodex, { env: { PATH: `${codexBin}:${process.env.PATH ?? ""}` } }).stdout;
-  };
-  check("a second account whose read FAILS refuses selection",
-    secondAccount("exit 1") === "none|indeterminate|1", secondAccount("exit 1"));
-  check("a second account whose read TIMES OUT refuses selection",
-    secondAccount("sleep 30") === "none|indeterminate|1");
-  check("a second account with MALFORMED json refuses selection",
-    secondAccount(`printf '{"token_response":{"access_token":"x"'`) === "none|indeterminate|1");
-  // The one case that must not poison the result: parses cleanly, genuinely has
-  // no token. Treating this as "unknown" would let a single junk keychain entry
-  // disable capture permanently.
-  check("a second account that parses and simply has no token resolves cleanly",
-    secondAccount(`printf '{"server_name":"brains","url":"${ORIGIN}/mcp","token_response":{}}'`) === "RESOLVED|ok|0");
-  // Two stale Codex aliases holding the SAME bearer are one credential, not an
-  // ambiguity. The collapse was applied to the Claude path only after the
-  // restructure, which turned this into indeterminate and switched capture off
-  // for a credential that was never ambiguous.
-  check("two Codex accounts carrying the same token collapse and resolve",
-    secondAccount(`printf '{"server_name":"brains","url":"${ORIGIN}/mcp","token_response":{"access_token":"tok-good"}}'`) === "RESOLVED|ok|0",
-    secondAccount(`printf '{"server_name":"brains","url":"${ORIGIN}/mcp","token_response":{"access_token":"tok-good"}}'`));
+  // No variable has to be set: with CODEX_HOME empty the file is found under
+  // ~/.codex, and a non-empty CODEX_HOME wins, exactly as Codex resolves it.
+  {
+    const rig = codexRig({ "brains|0123456789abcdef": codexEntry("tok-codex-home") });
+    mkdirSync(join(rig.env.HOME, ".codex"), { recursive: true });
+    writeFileSync(join(rig.env.HOME, ".codex", ".credentials.json"),
+      JSON.stringify({ "brains|0123456789abcdef": codexEntry("tok-dot-codex") }));
+    const wins = codexResolve(rig);
+    check("a non-empty CODEX_HOME wins over ~/.codex",
+      wins.out === "ok|codex-oauth|1" && wins.auth === "Bearer tok-codex-home", `out=${wins.out} auth=${wins.auth}`);
+    rig.env.CODEX_HOME = "";
+    const fallback = codexResolve(rig);
+    check("with CODEX_HOME empty the file under ~/.codex is read, nothing set by hand",
+      fallback.out === "ok|codex-oauth|1" && fallback.auth === "Bearer tok-dot-codex", `out=${fallback.out} auth=${fallback.auth}`);
+    check("...and `security` was never run", rig.securityCalls().length === 0, rig.securityCalls().join(" / "));
+  }
+  {
+    // The hooks run under `set -u`. With neither variable there is no path to
+    // build, which is "no file" — never an unbound-variable abort, never /.codex.
+    const rig = codexRig();
+    const r = codexResolve(rig, "unset HOME CODEX_HOME\n");
+    check("HOME and CODEX_HOME both unset: no-credential, exit 0, nothing on stderr",
+      r.out === "no-credential||0" && r.status === 0 && r.stderr === "", `out=${r.out} status=${r.status} stderr=${r.stderr}`);
+    check("...and `security` was never run", rig.securityCalls().length === 0, rig.securityCalls().join(" / "));
+  }
 }
 
 // =============================================================== explicit tokens
@@ -971,30 +1077,22 @@ section("the cleanup primitive cannot touch anything it does not own");
   check("and the temp root itself is never removed",
     readDirNames(join(state, "tmp")).length >= 0 && existsSync(join(state, "tmp")));
 
-  // The Codex override store is a real file in a real directory. Every outcome
-  // — resolved, non-matching, ambiguous, malformed — must leave it alone.
+  // CODEX_HOME is the user's own directory. Every outcome — resolved,
+  // non-matching, ambiguous, malformed — must leave it and the file alone.
   const cases: Array<[string, unknown, string]> = [
-    ["a successful resolve", [{ server_name: "brains", url: `${ORIGIN}/mcp`, token_response: { access_token: "tok-a" } }], "ok"],
-    ["a non-matching origin", [{ server_name: "brains", url: "http://127.0.0.1:9999/mcp", token_response: { access_token: "tok-a" } }], "blocked"],
-    ["an ambiguous store", [
-      { server_name: "brains", url: `${ORIGIN}/mcp`, token_response: { access_token: "tok-a" } },
-      { server_name: "brains", url: `${ORIGIN}/mcp`, token_response: { access_token: "tok-b" } },
-    ], "indeterminate"],
-    ["a malformed store", '[{"server_name":"brains","token_response":{"access_token":', "indeterminate"],
+    ["a successful resolve", { "brains|a": codexEntry("tok-a") }, "ok"],
+    ["a non-matching origin", { "brains|a": codexEntry("tok-a", "http://127.0.0.1:9999/mcp") }, "blocked"],
+    ["an ambiguous store", { "brains|a": codexEntry("tok-a"), "brains|b": codexEntry("tok-b") }, "indeterminate"],
+    ["a malformed store", '{"brains|a":{"server_name":"brains","access_token":', "indeterminate"],
   ];
   for (const [label, body, wantState] of cases) {
-    const userdir = join(temp, `codex-userdir-${Buffer.from(label).toString("hex").slice(0, 8)}`);
-    mkdirSync(userdir, { recursive: true });
-    const storePath = join(userdir, "codex-store.json");
-    writeFileSync(storePath, typeof body === "string" ? body : JSON.stringify(body));
-    writeFileSync(join(userdir, "SENTINEL.txt"), "keep me");
-    const out = sh(
-      `BRAINS_CRED_CLIENT=codex\nbrains_resolve_credential ${JSON.stringify(ORIGIN)} >/dev/null 2>&1\nprintf '%s' "$BRAINS_CRED_STATE"`,
-      { env: { BRAINS_CODEX_CREDENTIALS_FILE: storePath } },
-    );
-    check(`${label}: the user's own store directory survives`,
-      existsSync(userdir) && existsSync(storePath) && existsSync(join(userdir, "SENTINEL.txt")) && out.stdout === wantState,
-      `state=${out.stdout} dir=${existsSync(userdir)} store=${existsSync(storePath)}`);
+    const rig = codexRig(body);
+    const storePath = join(rig.home, ".credentials.json");
+    writeFileSync(join(rig.home, "SENTINEL.txt"), "keep me");
+    const out = codexResolve(rig).out.split("|")[0];
+    check(`${label}: the user's own Codex directory survives`,
+      existsSync(storePath) && existsSync(join(rig.home, "SENTINEL.txt")) && out === wantState,
+      `state=${out} store=${existsSync(storePath)}`);
   }
 }
 
@@ -1105,6 +1203,58 @@ section("the turn hook's backgrounded ingest actually carries a credential");
     readDirNames(join(state, "tmp")).join(","));
 }
 
+// =============================================================== no keychain on Codex
+section("Codex: no hook runs `security`, at session start, on a prompt, or at stop");
+{
+  // The real hooks, each against an absent, a usable and a malformed file. Each
+  // run has its own state, HOME, CODEX_HOME and bearer, and must show two
+  // things: its outcome, which proves the resolver got as far as the store,
+  // and an empty `security` log.
+  const START = join(PLUGIN, "hooks", "brains-start.sh");
+  const hooks: Array<[string, string, unknown, string]> = [
+    ["SessionStart", START, { session_id: "nokc" }, "inbox"],
+    ["UserPromptSubmit", TURN, { session_id: "nokc", prompt: "hello" }, "ingest"],
+    ["Stop", TURN, { session_id: "nokc", last_assistant_message: "answer" }, "ingest"],
+  ];
+  let n = 0;
+  for (const [event, script, payload, cap] of hooks) {
+    for (const file of ["absent", "usable", "malformed"]) {
+      const bearer = `tok-nokc-${++n}`;
+      const rig = codexRig(
+        file === "absent" ? undefined
+          : file === "usable" ? { "brains|0123456789abcdef": codexEntry(bearer) }
+          : '{"brains|0123456789abcdef":{"server_name":"brains","access_token":',
+      );
+      const which = spawnSync("sh", ["-c", "command -v security"], { env: rig.env, encoding: "utf8" }).stdout.trim();
+      const mark = readHits().length;
+      const r = spawnSync("bash", [script], {
+        input: JSON.stringify(payload),
+        env: { ...rig.env, PLUGIN_ROOT: PLUGIN },
+        encoding: "utf8", timeout: 30000,
+      });
+      let outcome = "";
+      if (file === "usable") {
+        // Some of these requests are backgrounded, so wait for one to land.
+        for (let i = 0; i < 40 && outcome === ""; i++) {
+          if (readHits().slice(mark).some((h) => h.auth === `Bearer ${bearer}`)) outcome = "bearer received";
+          else spawnSync("sleep", ["0.1"]);
+        }
+      } else {
+        outcome = sh(
+          `BRAINS_CRED_CLIENT=codex\nbrains_resolve_endpoints "${ORIGIN}"\nprintf '%s' "$(brains_health_state ${cap} "$BRAINS_URL_${cap === "ingest" ? "INGEST" : "INBOX"}")"`,
+          { state: rig.state, env: rig.env },
+        ).stdout;
+      }
+      const want = file === "absent" ? "no-credential" : file === "usable" ? "bearer received" : "indeterminate";
+      check(`${event}, credentials file ${file}: the resolver reached the store (${want})`,
+        r.status === 0 && outcome === want, `status=${r.status} outcome=${outcome || "(none)"}`);
+      check(`${event}, credentials file ${file}: \`security\` was never run`,
+        which === join(rig.bin, "security") && rig.securityCalls().length === 0,
+        `security=${which} argv: ${rig.securityCalls().join(" / ") || "(none)"}`);
+    }
+  }
+}
+
 // =============================================================== housekeeping
 section("session start sweeps what nothing else removes");
 {
@@ -1171,6 +1321,7 @@ section("the turn hook's other halves — time injection, the off-state record, 
         CLAUDE_PLUGIN_OPTION_TOKEN: "", BRAINS_API_TOKEN: "", BRAINS_INBOX_TOKEN: "",
         BRAINS_STATE_DIR: state, BRAINS_ENDPOINT: ORIGIN,
         BRAINS_CREDENTIAL_STORE_DISABLED: "1",
+        CODEX_HOME: EMPTY_CODEX_HOME,
         ...extra,
       },
       encoding: "utf8", timeout: 30000,
@@ -1211,22 +1362,21 @@ section("the turn hook's other halves — time injection, the off-state record, 
 
   // 3. The client the hook declares to the resolver. On Codex this selects a
   //    different store entirely, so dropping it silently sends a Codex user to
-  //    the Claude keychain.
+  //    the Claude store.
   {
     const state = freshState();
     const store = fixture("client-decl-store", {
       mcpOAuth: { "a|1": { accessToken: "tok-claude-store", serverUrl: `${ORIGIN}/mcp`, serverName: "brains" } },
     });
-    const codexArray = fixture("client-decl-codex", [
-      { server_name: "brains", url: `${ORIGIN}/mcp`, token_response: { access_token: "tok-codex-store" } },
-    ]);
+    const rig = codexRig({ "brains|0123456789abcdef": codexEntry("tok-codex-store") });
     const mark = readHits().length;
     // PLUGIN_ROOT is what the hook reads to decide it is running under Codex.
     runTurn({ session_id: "clientdecl", last_assistant_message: "answer" }, state, {
       PLUGIN_ROOT: PLUGIN,
       BRAINS_CREDENTIAL_STORE_DISABLED: "",
       BRAINS_CLAUDE_CREDENTIALS_FILE: store,
-      BRAINS_CODEX_CREDENTIALS_FILE: codexArray,
+      CODEX_HOME: rig.home,
+      PATH: rig.env.PATH,
     });
     let posts: Hit[] = [];
     for (let i = 0; i < 30 && posts.length === 0; i++) {
@@ -1569,65 +1719,43 @@ section("a large but valid store still resolves");
     elapsed < 3000, `${elapsed}ms — the selection loop is forking per entry again`);
 }
 
-// =============================================================== codex arrays
-section("duplicate collapse covers the array backend as well as the keychain");
+// =============================================================== codex duplicates
+section("duplicate collapse covers the Codex credentials file");
 {
-  // The keychain backend gets one private file per account; the array backend
-  // names the same document on every row, so the slurp-based collapse saw one
-  // array and errored, and two aliases holding a single bearer were reported as
-  // an ambiguity — capture off for a credential that was never ambiguous.
+  // Every row names the one snapshot of the file, so the collapse counts
+  // distinct tokens by key inside it: two keys holding a single bearer are one
+  // credential, not an ambiguity that switches capture off.
   const probe = (body: unknown) => {
-    const f = fixture(`codex-array-${Buffer.from(JSON.stringify(body)).toString("hex").slice(0, 10)}`, body);
+    const rig = codexRig(body);
     return sh(
       `BRAINS_CRED_CLIENT=codex\n` +
         `if brains_resolve_credential ${JSON.stringify(ORIGIN)}; then printf 'RESOLVED|%s' "$BRAINS_CRED_COUNT"; else printf 'none|%s|%s' "$BRAINS_CRED_STATE" "$BRAINS_CRED_COUNT"; fi`,
-      { env: { BRAINS_CODEX_CREDENTIALS_FILE: f } },
+      { state: rig.state, env: rig.env },
     ).stdout;
   };
-  const same = [
-    { server_name: "brains", url: `${ORIGIN}/mcp`, token_response: { access_token: "tok-same" } },
-    { server_name: "brains", url: `${ORIGIN}/mcp`, token_response: { access_token: "tok-same" } },
-  ];
-  const diff = [
-    { server_name: "brains", url: `${ORIGIN}/mcp`, token_response: { access_token: "tok-a" } },
-    { server_name: "brains", url: `${ORIGIN}/mcp`, token_response: { access_token: "tok-b" } },
-  ];
-  check("two array entries carrying one bearer collapse and resolve",
+  const same = { "brains|a": codexEntry("tok-same"), "brains|b": codexEntry("tok-same") };
+  const diff = { "brains|a": codexEntry("tok-a"), "brains|b": codexEntry("tok-b") };
+  check("two entries carrying one bearer collapse and resolve",
     probe(same) === "RESOLVED|1", probe(same));
-  check("two array entries carrying different bearers stay indeterminate",
+  check("two entries carrying different bearers stay indeterminate",
     probe(diff) === "none|indeterminate|2", probe(diff));
 
-  // A MIXED array — one entry for brains, one for something else. Only the
-  // all-matching shapes above were covered, and that is precisely the shape the
-  // bug could not reach: the non-matching row discarded the snapshot every row
-  // shares, so selection found its one credential and the config writer then
-  // read a deleted file. `count=1` with state `indeterminate` is the signature.
-  //
-  // Both orders, because the failure depended on the non-matching row coming
-  // first or last only in how far it got before losing the document.
-  const mixed = [
-    { server_name: "brains", url: `${ORIGIN}/mcp`, token_response: { access_token: "tok-mine" } },
-    { server_name: "other", url: `${ORIGIN}/mcp`, token_response: { access_token: "tok-theirs" } },
-  ];
+  // A MIXED file — one entry for brains, one for something else — in both key
+  // orders. A non-matching row must never cost the winner the document it is
+  // still to be read from; `count=1` with state `indeterminate` is the signature.
   check("a matching entry alongside a non-matching one still resolves",
-    probe(mixed) === "RESOLVED|1", probe(mixed));
-  check("and so does the same array in the other order",
-    probe([mixed[1], mixed[0]]) === "RESOLVED|1", probe([mixed[1], mixed[0]]));
+    probe({ "brains|a": codexEntry("tok-mine"), "other|b": codexEntry("tok-theirs", `${ORIGIN}/mcp`, "other") }) === "RESOLVED|1");
+  check("and so does the same pair in the other order",
+    probe({ "a-other|a": codexEntry("tok-theirs", `${ORIGIN}/mcp`, "other"), "brains|b": codexEntry("tok-mine") }) === "RESOLVED|1");
 
-  // The WINNING record is the one file that has to outlive selection, and it is
-  // therefore the one nothing was checking got removed afterwards. Dropping the
-  // discard left `tmp/r.<pid>.<rand>/v` on disk with the plaintext bearer in it
-  // until the five-minute prune — a window nothing here could see. Asserted on
-  // the whole tmp tree rather than on one path, so a future backend that leaves
-  // a different file behind fails this too.
-  const state = freshState();
-  const f = fixture("codex-cleanup", [
-    { server_name: "brains", url: `${ORIGIN}/mcp`, token_response: { access_token: "tok-cleanup" } },
-  ]);
+  // The snapshot holds every bearer in the file in plaintext, so it must not
+  // outlive the resolve. Asserted on the whole tmp tree rather than on one
+  // path, so a future backend that leaves a different file behind fails too.
+  const rig = codexRig({ "brains|a": codexEntry("tok-cleanup") });
   const r = sh(
     `BRAINS_CRED_CLIENT=codex\nbrains_resolve_credential ${JSON.stringify(ORIGIN)} || exit 1\n` +
       `printf '%s' "$(find "$BRAINS_STATE_DIR/tmp" -type f ! -name curl.conf 2>/dev/null | wc -l | tr -d ' ')"`,
-    { state, env: { BRAINS_CODEX_CREDENTIALS_FILE: f } },
+    { state: rig.state, env: rig.env },
   );
   check("a Codex resolve leaves no store copy behind, only the curl config",
     r.stdout === "0", `${r.stdout} file(s) left in tmp`);
@@ -1663,17 +1791,6 @@ type Mutation = {
 // that verdict on a loaded machine, and the ones without a precondition are the
 // ones that could. Pinning the unmutated answer turns "the probe never reached
 // its mechanism" from a flaky red into a specific one that names the setup.
-// A stub keychain tool that enumerates one Codex account, for hosts with none.
-const CODEX_DUMP_STUB = [
-  "#!/bin/sh",
-  'if [ "$1" = "dump-keychain" ]; then',
-  '  printf \'    "acct"<blob>="brains|a"\\n\'',
-  '  printf \'    "svce"<blob>="Codex MCP Credentials"\\n\'',
-  "  exit 0",
-  "fi",
-  'printf \'{"server_name":"brains","url":"%s/mcp","token_response":{"access_token":"tok-x"}}\' "$ORIGIN"',
-  "",
-].join("\n");
 const MUTATIONS: Mutation[] = [
   {
     // Registered as the PAIR — the trap and the explicit return — and observed
@@ -1747,33 +1864,6 @@ printf '%s/%s' "$(acks)" "$(leases)"`,
       BRAINS_INBOX_URL: `${ORIGIN}/inbox/ackable`,
       BRAINS_INBOX_ACK_URL: `${ORIGIN}/inbox/claude/ack`,
     },
-  },
-  {
-    // Named for what the mutation actually removes. The label used to claim
-    // "LC_ALL=C + PIPESTATUS" while only the PIPESTATUS line was touched, so the
-    // locale pin was riding on a certification that never covered it — the same
-    // shape of overclaim this gate exists to stop. LC_ALL=C guards a parse whose
-    // difference needs a locale the runner may not have; it is not registered
-    // here rather than registered dishonestly.
-    label: "the account-list completeness check (PIPESTATUS)",
-    file: "hooks/lib/brains-credential.sh",
-    find: `  set -- "\${PIPESTATUS[0]}" "\${PIPESTATUS[1]}"`,
-    replace: `  set -- 0 0`,
-    // With awk failing, a partial account list must not be treated as complete.
-    // Stubs are written from the test rather than by an escaped printf inside
-    // the probe: the shell-quoted version worked on macOS and produced a
-    // security stub the Linux runner could not use, so the probe answered
-    // "no-credential" both with and without the mechanism and the gate — quite
-    // correctly — refused to certify it.
-    stubs: { security: CODEX_DUMP_STUB, awk: "#!/bin/sh\nexit 2\n" },
-    probe: `PATH="$STUBS:$PATH"; unset BRAINS_CLAUDE_CREDENTIALS_FILE
-. "$LIB"; BRAINS_CRED_CLIENT=codex; brains_resolve_credential "$ORIGIN" >/dev/null 2>&1
-printf '%s/%s' "$BRAINS_CRED_STATE" "$BRAINS_CRED_TRUNCATED"`,
-    // The mechanism only exists on the account-enumeration path, which needs a
-    // usable security binary. If the stub cannot be made to work, that is recorded
-    // out loud — a quietly skipped mutation probe is exactly the vacuous pass
-    // this gate exists to prevent.
-    requires: "indeterminate/1",
   },
   {
     label: "the session-end prune of SIGKILL leftovers",
@@ -1853,16 +1943,14 @@ else printf 'neither'; fi`,
     requires: "handler",
   },
   {
-    // The total budget is documented as bounding the whole resolution, and until
-    // this change it was consulted on one path only — the Codex enumeration —
-    // leaving the Claude selection loop, the one the widened document ceiling
-    // grew, unbounded. Driven with the budget set to zero so the guard is
-    // reached deterministically instead of by building a pathological store.
-    label: "the total budget applied to the selection loop, not just enumeration",
+    // The total budget is documented as bounding the whole resolution, and the
+    // selection loop — the one the widened document ceiling grew — is where it
+    // has to bite. Driven with the budget set to zero so the guard is reached
+    // deterministically instead of by building a pathological store.
+    label: "the total budget applied to the selection loop",
     file: "hooks/lib/brains-credential.sh",
     find: `    if ! _brains_budget_left; then
       BRAINS_CRED_TRUNCATED=1
-      [ "$recfile" != "\${store:-}" ] && _brains_discard "$recfile"
       continue
     fi`,
     replace: "",
@@ -1872,27 +1960,21 @@ printf '%s/%s' "$BRAINS_CRED_STATE" "$BRAINS_CRED_TRUNCATED"`,
     requires: "indeterminate/1",
   },
   {
-    // A non-matching row may discard only a record file PRIVATE to it. Keying
-    // that on the client rather than on shared-ness is what let the Codex ARRAY
-    // backend delete the snapshot every row names, after the same bug had been
-    // fixed on the Claude path — so the mutation restores the client check and
-    // requires the mixed array to break.
-    label: "the shared-snapshot guard in the selection loop (keyed on shared-ness)",
+    // Codex writes its credentials file in place, so a read can land on a
+    // document that is not there yet. Without the guard that is "an empty
+    // store", and the user is told they have no sign-in when they have one.
+    // A whitespace-only file rather than a zero-length one: the bounded reader
+    // already refuses zero bytes, so only this shape reaches jq.
+    label: "the one-JSON-object guard on the Codex credentials file",
     file: "hooks/lib/brains-credential.sh",
-    find: `    if ! _brains_is_brains_server "$name" ||
-       ! corigin=$(brains_origin "$url") ||
-       [ "$corigin" != "$want" ]; then`,
-    replace: `    if ! _brains_is_brains_server "$name" ||
-       ! corigin=$(brains_origin "$url") ||
-       [ "$corigin" != "$want" ]; then
-      [ "\${BRAINS_CRED_CLIENT:-claude}" = "codex" ] && _brains_discard "$recfile"
-      continue`,
-    probe: `printf '%s' '[{"server_name":"brains","url":"'"$ORIGIN"'/mcp","token_response":{"access_token":"tok-mine"}},{"server_name":"other","url":"'"$ORIGIN"'/mcp","token_response":{"access_token":"tok-theirs"}}]' > "$BRAINS_STATE_DIR/mixed.json"
-export BRAINS_CODEX_CREDENTIALS_FILE="$BRAINS_STATE_DIR/mixed.json"
-. "$LIB"; BRAINS_CRED_CLIENT=codex
-brains_resolve_credential "$ORIGIN" >/dev/null 2>&1
-printf '%s/%s' "$BRAINS_CRED_STATE" "$BRAINS_CRED_COUNT"`,
-    requires: "ok/1",
+    find: `if length != 1 or (.[0] | type) != "object" then error("not one object") else .[0] end`,
+    replace: `.[]`,
+    stubs: { codex: "#!/bin/sh\nexit 1\n", security: "#!/bin/sh\nexit 1\n" },
+    probe: `PATH="$STUBS:$PATH"; export CODEX_HOME="$BRAINS_STATE_DIR/codex-home"
+mkdir -p "$CODEX_HOME"; printf ' \\n' > "$CODEX_HOME/.credentials.json"
+. "$LIB"; BRAINS_CRED_CLIENT=codex; brains_resolve_credential "$ORIGIN" >/dev/null 2>&1
+printf '%s' "$BRAINS_CRED_STATE"`,
+    requires: "indeterminate",
   },
 ];
 {
