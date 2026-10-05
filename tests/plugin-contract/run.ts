@@ -1312,7 +1312,8 @@ for (const signal of [
   // fact it had already found but could not read.
   "read actions via `act_on_integration`",
   "After ~5 empty live searches for one fact, stop and report what you tried",
-  "If you find the source but can't read it, say what you found and stop; never guess",
+  "If you find the source but can't read it, say what you found and stop",
+  "Never guess",
   "Chain dependent reads; don't fan them out",
   "never invent slugs or IDs",
   "The skills carry the detail",
@@ -1401,7 +1402,7 @@ const CORE_BODY = [
   "(Gmail/Calendar/Drive: `fetch_from_integration`; Outlook, OneDrive, other",
   "installs: read actions via `act_on_integration`), then re-read. After ~5 empty",
   "live searches for one fact, stop and report what you tried. If you find the",
-  "source but can't read it, say what you found and stop; never guess. Chain",
+  "source but can't read it, say what you found and stop. Never guess. Chain",
   "dependent reads; don't fan them out.",
   "",
   "For schedules and agendas, use `list_calendar_events start=… end=…`; calendar",
@@ -1650,6 +1651,7 @@ const readSkillNormalized = readFileSync(join(PLUGIN, "skills", "brains-read", "
   .replace(/\s+/g, " ");
 for (const signal of [
   "`get_attachments` to read an attachment's text",
+  "`get_attachments` needs Outlook v2",
   "`fetch_from_integration` does not accept these",
   "after ~5 empty results for one fact, stop and tell the user what you searched",
   "tell the user what you found and that you couldn't read it, then stop",

@@ -18,7 +18,7 @@ expected mail, calendar or file data is missing, pull it live
 (Gmail/Calendar/Drive: `fetch_from_integration`; Outlook, OneDrive, other
 installs: read actions via `act_on_integration`), then re-read. After ~5 empty
 live searches for one fact, stop and report what you tried. If you find the
-source but can't read it, say what you found and stop; never guess. Chain
+source but can't read it, say what you found and stop. Never guess. Chain
 dependent reads; don't fan them out.
 
 For schedules and agendas, use `list_calendar_events start=… end=…`; calendar

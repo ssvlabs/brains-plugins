@@ -144,6 +144,9 @@ text="<intent>"`, `get_page` the result, then call it with `act_on_integration`
 - **Outlook** — `search_messages` to find mail, `get_message` to open one, and
   `get_attachments` to read an attachment's text. `download_outlook_attachment`
   returns only a file reference, not the contents, so use `get_attachments`.
+  `get_attachments` needs Outlook v2. If the install doesn't have it (the call
+  fails with `not declared by recipe outlook-composio v1`), tell the user that
+  upgrading the Outlook integration adds it.
 - **OneDrive** — `search_items` to find a file (`onedrive_find_file` when you
   know the folder), `get_item` for its details.
 
