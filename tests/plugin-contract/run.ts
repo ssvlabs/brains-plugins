@@ -1652,6 +1652,8 @@ const readSkillNormalized = readFileSync(join(PLUGIN, "skills", "brains-read", "
 for (const signal of [
   "`get_attachments` to read an attachment's text",
   "`get_attachments` needs Outlook v2",
+  "`not declared by recipe outlook-composio v1`",
+  "tell the user that upgrading the Outlook integration adds it",
   "`fetch_from_integration` does not accept these",
   "after ~5 empty results for one fact, stop and tell the user what you searched",
   "tell the user what you found and that you couldn't read it, then stop",
