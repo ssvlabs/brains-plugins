@@ -141,7 +141,9 @@ accept these. Find the install's read action with `query type=integration_action
 text="<intent>"`, `get_page` the result, then call it with `act_on_integration`
 (call shape: `brains-write`). Use read actions only:
 
-- **Outlook** — `search_messages` to find mail, `get_message` to open one, and
+- **Outlook** — `search_messages` to find mail (Microsoft 365 accounts
+  only; on an outlook.com or hotmail.com account use `query_emails` or
+  `list_messages` on one folder), `get_message` to open one, and
   `get_attachments` to read an attachment's text. `download_outlook_attachment`
   returns only a file reference, not the contents, so use `get_attachments`.
   `get_attachments` needs Outlook v2. If the install doesn't have it (the call
