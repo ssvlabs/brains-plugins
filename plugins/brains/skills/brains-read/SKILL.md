@@ -111,6 +111,11 @@ it was keyword-only, relax the cutoff if it was semantic (`query_pages` rejects
 switch collection. Say "found nothing" only after the right arm, well scoped,
 comes back empty — not after one empty call.
 
+"Different" has a limit for live provider searches (`fetch_from_integration`,
+or an install's search action via `act_on_integration`): after ~5 empty
+results for one fact, stop and tell the user what you searched. They can ask
+you to keep going.
+
 ## Cite what you find
 
 Name the source: *"From your email **[Re: Ethera]** (Apr 19), Noah followed
@@ -119,7 +124,9 @@ up…"* Use the page `title` + `type`. Never invent slugs or IDs.
 ## When it comes up empty
 
 If a search/query/list returns nothing for something that should exist, the cron
-ingestor may be behind. Pull on demand, then re-run your read:
+ingestor may be behind. Pull on demand, then re-run your read.
+
+**Gmail, Calendar, Drive:**
 
 `fetch_from_integration source=<gmail|calendar|drive> request="<natural language>"`
 
@@ -127,9 +134,28 @@ ingestor may be behind. Pull on demand, then re-run your read:
 week's events", "the deck on Q3 strategy".) Prefer this over the raw
 `mcp__claude_ai_*` MCPs — it persists results as pages. For very recent mail or
 Gmail-only operators (`has:attachment`, `is:unread`, `newer_than:7d`), the
-gmail-inbox `query_emails` action runs a live Gmail search (see `brains-write`).
+gmail-inbox `search_emails` action runs a live Gmail search (see `brains-write`).
+
+**Outlook, OneDrive, and other installs:** `fetch_from_integration` does not
+accept these. Find the install's read action with `query type=integration_action
+text="<intent>"`, `get_page` the result, then call it with `act_on_integration`
+(call shape: `brains-write`). Use read actions only:
+
+- **Outlook** — `search_messages` to find mail, `get_message` to open one, and
+  `get_attachments` to read an attachment's text. `download_outlook_attachment`
+  returns only a file reference, not the contents, so use `get_attachments`.
+  `get_attachments` needs Outlook v2. If the install doesn't have it (the call
+  fails with `not declared by recipe outlook-composio v1`), tell the user that
+  upgrading the Outlook integration adds it.
+- **OneDrive** — `search_items` to find a file (`onedrive_find_file` when you
+  know the folder), `get_item` for its details.
+
+**Found but unreadable.** If you find the source (an email, an attachment, a
+file) but can't read its contents — say, you only get a link or a file
+reference — tell the user what you found and that you couldn't read it, then
+stop. Never guess the values.
 
 If a fetch returns 0, broaden the request, switch legs (`vec:false` ↔ hybrid;
 `search` ↔ `query` on a server without the arms), switch collection, or widen
-the scope. Still nothing → say so plainly: *"Brains has no page matching X."*
-Don't fabricate.
+the scope — within the ~5-empty limit above. Still nothing → say so plainly,
+with what you tried: *"Brains has no page matching X."* Don't fabricate.
