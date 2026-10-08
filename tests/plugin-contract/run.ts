@@ -1303,7 +1303,7 @@ if (!claudeOnPath) {
   }
 }
 
-assert(core.includes("<!-- brains:core:start v=7 -->"), "core marker must be v7");
+assert(core.includes("<!-- brains:core:start v=8 -->"), "core marker must be v8");
 for (const signal of [
   "Query brains reflexively",
   "list_calendar_events",
@@ -1312,7 +1312,14 @@ for (const signal of [
   "`query` for conceptual requests",
   "`get_page` only after",
   "fetch_from_integration",
-  "report a plain miss",
+  // Live recovery is provider-neutral: installs (Outlook, OneDrive, …) are not served by
+  // fetch_from_integration, so core must route them to their read actions. And it must bound
+  // the search — an Outlook agent with no stop rule made 144 live searches (86 empty) for one
+  // fact it had already found but could not read.
+  "read actions via `act_on_integration`",
+  "After ~5 empty live searches for one fact, stop and report what you tried",
+  "If you find the source but can't read it, say what you found and stop",
+  "Never guess",
   "Chain dependent reads; don't fan them out",
   "never invent slugs or IDs",
   "The skills carry the detail",
@@ -1381,7 +1388,7 @@ const CORE_CAPTURE_REGION = [
 // markers: text above the start marker or below the end marker is injected just the same. The marker
 // line is inside the pin, so the v= bump both suites assert stays part of the same edit.
 const CORE_BODY = [
-  "<!-- brains:core:start v=7 -->",
+  "<!-- brains:core:start v=8 -->",
   "# brains — your memory layer",
   "",
   "You have a memory layer called **brains** (the `brains` MCP server). It holds the",
@@ -1390,16 +1397,19 @@ const CORE_BODY = [
   "",
   "**Query brains reflexively.** If a request depends on a person, project,",
   "meeting, email, document, prior discussion, or \"what did I see,\" look in brains",
-  "before guessing, asking the user, web search, browser fetches, or raw Google",
+  "before guessing, asking the user, web search, browser fetches, or raw",
   "connectors. Skip it for pure current-repository code, general knowledge,",
   "explicit memory opt-out, or when brains is unavailable.",
   "",
   "**Use the cheapest useful read.** Cache `whoami` and `list_integrations` once",
   "per session. Use `list_pages` for recents, `search` for exact terms, `query` for",
   "conceptual requests, and `get_page` only after a result supplies a slug. If",
-  "expected Gmail, Calendar, or Drive data is missing, use",
-  "`fetch_from_integration`, then repeat the read and report a plain miss rather",
-  "than inventing a result. Chain dependent reads; don't fan them out.",
+  "expected mail, calendar or file data is missing, pull it live",
+  "(Gmail/Calendar/Drive: `fetch_from_integration`; Outlook, OneDrive, other",
+  "installs: read actions via `act_on_integration`), then re-read. After ~5 empty",
+  "live searches for one fact, stop and report what you tried. If you find the",
+  "source but can't read it, say what you found and stop. Never guess. Chain",
+  "dependent reads; don't fan them out.",
   "",
   "For schedules and agendas, use `list_calendar_events start=… end=…`; calendar",
   "page update time is not event time. Name the source page's `title` and `type`,",
@@ -1415,22 +1425,21 @@ const CORE_BODY = [
   "web) it is the only path.",
   "",
   "**The skills carry the detail** — load the one that fits the moment:",
-  "`brains-read` (querying memory), `brains-write` (sending/creating via",
-  "integrations), `brains-agenda` (schedule/plan shape), `brains-build`",
+  "`brains-read` (querying memory), `brains-write` (sending/creating),",
+  "`brains-agenda` (schedule/plan shape), `brains-build`",
   "(boards/automations/workflows), `brains-integrations` (install/upgrade),",
-  "`brains-nudges` (when to suggest a feature), and `brains-feedback` (reporting a",
-  "brains bug / giving feedback). Don't reproduce them here — open the skill.",
+  "`brains-nudges` (feature suggestions), and `brains-feedback` (bug reports,",
+  "feedback).",
   "",
   "On a non-transient brains tool error or user frustration with brains, note the",
   "error and what you were doing, then offer one quiet trailing line to report it,",
   "at most once per distinct error. Do not attach it to unrelated later feedback.",
-  "Once per session, when natural, mention `brains-feedback`; load the skill before",
-  "filing because it owns the procedure and redaction rules.",
+  "Once per session, when natural, mention `brains-feedback`; load it before filing",
+  "(it owns the redaction rules).",
   "",
-  "**Custom layer.** Your operator may ship a personal layer (voice, profile pages,",
-  "daily-loop overrides). The session-start hook injects it (`.codex/USER.md` or",
-  "`.claude/USER.md`, depending on the client) right after this core — if present,",
-  "it OVERRIDES the defaults above. Adopt it.",
+  "**Custom layer.** Your operator may ship a personal layer (voice, profile,",
+  "overrides), injected right after this core from `.codex/USER.md` or",
+  "`.claude/USER.md`. If present, it OVERRIDES the defaults above.",
   "<!-- brains:core:end -->",
 ].join("\n");
 const coreCaptureStart = core.indexOf("**Capture.**");
@@ -1640,6 +1649,25 @@ for (const dir of skillDirs) {
     `${dir} names a tool that does not exist in the brains MCP registry`,
   );
 }
+
+// brains-read carries the per-provider detail core.md has no room for. Outlook's
+// `download_outlook_attachment` returns only a file reference, so an agent that does not know
+// `get_attachments` finds the mail, cannot read it, and keeps searching — bound by the cap.
+const readSkillNormalized = readFileSync(join(PLUGIN, "skills", "brains-read", "SKILL.md"), "utf8")
+  .replace(/\s+/g, " ");
+for (const signal of [
+  "`get_attachments` to read an attachment's text",
+  "`get_attachments` needs Outlook v2",
+  "`not declared by recipe outlook-composio v1`",
+  "tell the user that upgrading the Outlook integration adds it",
+  "`fetch_from_integration` does not accept these",
+  "after ~5 empty results for one fact, stop and tell the user what you searched",
+  "tell the user what you found and that you couldn't read it, then stop",
+  "gmail-inbox `search_emails` action",
+]) {
+  assert(readSkillNormalized.includes(signal), `brains-read is missing live-search signal: ${signal}`);
+}
+assert(!readSkillNormalized.includes("query_emails"), "brains-read names `query_emails`; the gmail action is `search_emails`");
 
 // The whole rendered action contract, pinned verbatim. The `includes` assertions
 // below stay — they name WHICH rule broke, which "the paragraph changed" cannot —
