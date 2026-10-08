@@ -56,8 +56,6 @@
 # tests can be hermetic; they are not a user-facing interface.
 #   BRAINS_CREDENTIAL_STORE_DISABLED=1  skip every discovery step (4 and 5)
 #   BRAINS_CLAUDE_CREDENTIALS_FILE      read the Claude store from this file
-#   BRAINS_CODEX_CREDENTIALS_FILE       read the Codex store from this file
-#                                       (a JSON array of Codex records)
 
 # The credential DOCUMENT ceiling. This bounds memory; it is not a policy, and
 # it must not be small enough to reject a store a real user can accumulate. The
@@ -67,23 +65,13 @@
 # not exist. 4 MiB is about a thousand servers and still bounded.
 BRAINS_CRED_MAX_BYTES=4194304
 BRAINS_CRED_MAX_BLOCKS=8192
-# The keychain METADATA dump is a different size class entirely and needs its
-# own ceiling: measured at 198,137 bytes for 209 items on an ordinary machine,
-# which is 76% of the document cap. At ~300 items that cap silently truncates
-# the dump, the account list comes back short, and Codex capture turns off with
-# no signal. This contains no secrets — it is names and dates — so the only job
-# of this limit is to stop a pathological keychain eating memory.
-BRAINS_CRED_DUMP_MAX_BYTES=16777216
-BRAINS_CRED_DUMP_MAX_BLOCKS=32768
 # Wall-clock ceiling on a single store read. `security` answers in ~30ms; this
 # only matters when a keychain item carries a restrictive ACL, in which case it
 # blocks on a GUI dialog that stdin redirection cannot suppress.
 BRAINS_CRED_READ_DEADLINE=1
-# ...and a ceiling on ALL of them together. Per-read deadlines do not compose:
-# the Codex store is enumerated one account at a time, so N stale entries cost
-# N x the per-read deadline, and this hook runs on every prompt and every stop.
+# ...and a ceiling on the whole resolution. The selection loop walks every entry
+# of the store, and this hook runs on every prompt and every stop.
 BRAINS_CRED_TOTAL_BUDGET=3
-BRAINS_CRED_MAX_CANDIDATES=8
 _brains_cred_deadline_at=0
 
 # Default network ceilings. These live HERE, not at the call sites, because a
@@ -101,7 +89,7 @@ BRAINS_CRED_STATE="indeterminate"
 BRAINS_CRED_SOURCE=""
 BRAINS_CRED_BINDING=""
 BRAINS_CRED_ORIGIN=""
-BRAINS_CRED_LOCATOR=""    # which entry won; a key or an account name, never a token
+BRAINS_CRED_LOCATOR=""    # which entry won; a key, never a token
 BRAINS_CRED_CONFIG=""     # path to the private curl config holding the header
 BRAINS_CRED_COUNT=0       # distinct candidates seen; a count, never a name
 BRAINS_CRED_TRUNCATED=0   # an enumeration hit a limit or a read failed
@@ -473,42 +461,6 @@ _brains_snapshot() {
   printf '%s' "$out"
 }
 
-# ---------------------------------------------------------------- Codex store
-# Codex keys each entry by <server>|<hash> and the hash is not reconstructible,
-# so entries are enumerated and read by their own fields. dump-keychain prints
-# metadata only and does not prompt. Narrowing by server name here — on that
-# metadata — is what keeps the per-account candidate cap from ever binding.
-# Returns 1 when the dump itself could not be read, which the caller must treat
-# as an incomplete enumeration rather than an empty one.
-_brains_codex_accounts() {
-  local dumpfile server
-  server="${BRAINS_CRED_SERVER:-brains}"
-  dumpfile=$(_brains_bounded_read_file "$BRAINS_CRED_READ_DEADLINE" \
-               "$BRAINS_CRED_DUMP_MAX_BYTES" "$BRAINS_CRED_DUMP_MAX_BLOCKS" \
-               security dump-keychain) || return 1
-  LC_ALL=C awk -v want="$server" '
-    /^[[:space:]]*"acct"<blob>=/ {
-      acct = $0
-      sub(/^[^"]*"acct"<blob>="/, "", acct)
-      sub(/".*$/, "", acct)
-      last = acct
-    }
-    /"svce"<blob>="Codex MCP Credentials"/ {
-      if (last != "") {
-        name = last
-        sub(/\|.*$/, "", name)
-        if (name == want) print last
-      }
-    }
-  ' "$dumpfile" 2>/dev/null | sort -u
-  # A partial awk pass handed back as a COMPLETE enumeration is exactly what I2
-  # forbids, so the parse status is checked rather than assumed.
-  set -- "${PIPESTATUS[0]}" "${PIPESTATUS[1]}"
-  _brains_discard "$dumpfile"
-  { [ "$1" = "0" ] && [ "$2" = "0" ]; } || return 1
-  return 0
-}
-
 # ------------------------------------------------- the credential, never a var
 # Write the private curl config holding the Authorization header, straight from
 # the store through jq. See I1: at no point is the value assigned to a shell
@@ -539,10 +491,7 @@ _brains_write_config() {   # source-kind, locator, store-file(optional)
       claude-oauth)
         jq -r --arg k "$locator" '(.mcpOAuth[$k].accessToken // "")' "$store" 2>/dev/null ;;
       codex-oauth)
-        jq -r '(.token_response.access_token // "")' "$store" 2>/dev/null ;;
-      codex-oauth-array)
-        jq -r --argjson i "$locator" '(if type == "array" then .[$i] else . end)
-               | (.token_response.access_token // "")' "$store" 2>/dev/null ;;
+        jq -r --arg k "$locator" '(.[$k].access_token // "")' "$store" 2>/dev/null ;;
     esac | jq -Rr 'select(length > 0) | "header = " + (("Authorization: Bearer " + .) | @json)' >"$cfg" 2>/dev/null
   )
   rc=$?
@@ -608,8 +557,7 @@ brains_resolve_credential() {
 }
 
 _brains_resolve_credential_impl() {
-  local base want store meta line key url name corigin accts acct seen rec recfile
-  local matched matchedfiles count tab mf
+  local base want store meta key url name corigin matched count tab
   base="${1:-}"
   BRAINS_CRED_STATE="indeterminate"      # I2: downgrade only on proof
   BRAINS_CRED_SOURCE=""; BRAINS_CRED_BINDING=""; BRAINS_CRED_ORIGIN=""
@@ -669,57 +617,20 @@ _brains_resolve_credential_impl() {
   matched=""
   count=0
   if [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ]; then
-    if [ -n "${BRAINS_CODEX_CREDENTIALS_FILE:-}" ]; then
-      [ -f "$BRAINS_CODEX_CREDENTIALS_FILE" ] || { BRAINS_CRED_STATE="no-credential"; return 1; }
-      # Snapshot into the owned root first, so everything downstream operates on
-      # a copy we may freely discard — the same discipline the Claude backend
-      # follows. Referencing the live path here is what let the record-cleanup
-      # sweep reach the user's own directory.
-      store=$(_brains_snapshot "$BRAINS_CODEX_CREDENTIALS_FILE") || return 1
-      meta=$(jq -r --arg f "$store" \
-             '(if type == "array" then . else [.] end) | to_entries[]
-             | select((.value.token_response.access_token // "") != "")
-             | [(.key|tostring), (.value.url // ""), (.value.server_name // ""), $f] | @tsv' \
-             "$store" 2>/dev/null) || { _brains_discard "$store"; return 1; }
-    else
-      command -v security >/dev/null 2>&1 || { BRAINS_CRED_STATE="no-credential"; return 1; }
-      accts=$(_brains_codex_accounts) || { BRAINS_CRED_TRUNCATED=1; accts=""; }
-      meta=""
-      seen=0
-      while IFS= read -r acct; do
-        [ -n "$acct" ] || continue
-        if [ "$seen" -ge "$BRAINS_CRED_MAX_CANDIDATES" ] || ! _brains_budget_left; then
-          BRAINS_CRED_TRUNCATED=1
-          break
-        fi
-        seen=$((seen + 1))
-        rec=$(_brains_bounded_read_file "$BRAINS_CRED_READ_DEADLINE" \
-                "$BRAINS_CRED_MAX_BYTES" "$BRAINS_CRED_MAX_BLOCKS" \
-                security find-generic-password -s "Codex MCP Credentials" -a "$acct" -w) \
-          || { BRAINS_CRED_TRUNCATED=1; continue; }
-        # jq exits 0 having selected nothing for a record that simply holds no
-        # token — a conclusive answer about that account. It exits non-zero when
-        # the document will not parse, which is not conclusive. Collapsing both
-        # into "no candidate" understates; collapsing both into "unknown" would
-        # let one junk keychain entry disable capture forever.
-        line=$(jq -r --arg a "$acct" --arg f "$rec" \
-               'select((.token_response.access_token // "") != "")
-               | [$a, (.url // ""), (.server_name // ""), $f] | @tsv' "$rec" 2>/dev/null)
-        if [ "$?" -ne 0 ]; then
-          BRAINS_CRED_TRUNCATED=1
-          _brains_discard "$rec"
-          continue
-        fi
-        if [ -n "$line" ]; then
-          meta="$meta$line
-"
-        else
-          _brains_discard "$rec"
-        fi
-      done <<EOF2
-$accts
-EOF2
-    fi
+    # Codex's own credentials file and nothing else. Its default store is the
+    # system keychain, and reading that from a hook can raise a password prompt.
+    store="${CODEX_HOME:-${HOME:+$HOME/.codex}}"
+    { [ -n "$store" ] && [ -f "$store/.credentials.json" ]; } || { BRAINS_CRED_STATE="no-credential"; return 1; }
+    store=$(_brains_snapshot "$store/.credentials.json") || return 1
+    # Codex writes this file in place, so a read can land mid-write. Anything
+    # but exactly one JSON object is an unknown, not an empty store.
+    meta=$(jq -rs --arg s "${BRAINS_CRED_SERVER:-brains}" '
+           if length != 1 or (.[0] | type) != "object" then error("not one object") else .[0] end
+           | to_entries[]
+           | select((.value | type) == "object" and .value.server_name == $s
+                    and (.value.access_token | type) == "string" and .value.access_token != "")
+           | [.key, (.value.server_url // "" | tostring), .value.server_name] | @tsv' \
+           "$store" 2>/dev/null) || { _brains_discard "$store"; return 1; }
   else
     store=$(_brains_claude_store_file)
     case "$?" in
@@ -730,9 +641,9 @@ EOF2
       2) BRAINS_CRED_STATE="no-credential"; return 1 ;;
       *) return 1 ;;
     esac
-    meta=$(jq -r --arg f "$store" '(.mcpOAuth // {}) | to_entries[]
+    meta=$(jq -r '(.mcpOAuth // {}) | to_entries[]
            | select((.value.accessToken // "") != "")
-           | [.key, (.value.serverUrl // ""), (.value.serverName // ""), $f] | @tsv' \
+           | [.key, (.value.serverUrl // ""), (.value.serverName // "")] | @tsv' \
            "$store" 2>/dev/null)
     if [ "$?" -ne 0 ]; then
       _brains_discard "$store"
@@ -740,7 +651,6 @@ EOF2
     fi
   fi
 
-  matchedfiles=""
   # Two forks per entry lived in this loop, and the document ceiling that stopped
   # rejecting large stores turned that into seconds of hot path: a thousand-entry
   # store cost 4.6s per hook run, twice a turn. `IFS=$(printf '\t')` re-forks a
@@ -749,34 +659,21 @@ EOF2
   # is tested FIRST and the origin is only canonicalised for a row that could
   # still win. Same answers, 2.85s -> 0.25s at 1450 entries.
   tab=$(printf '\t')
-  while IFS="$tab" read -r key url name recfile; do
+  while IFS="$tab" read -r key url name; do
     [ -n "$key" ] || continue
     BRAINS_CRED_SAW_ENTRIES=1
-    # The total budget is documented as bounding the whole resolution, but until
-    # now it was consulted on the Codex enumeration path only — leaving the very
-    # loop the wider ceiling grew unbounded. Draining rather than breaking, so
-    # the Codex arm's private record files are still discarded here rather than
-    # left for the prune.
+    # The total budget bounds the whole resolution, and this is the loop the
+    # wider document ceiling grew.
     if ! _brains_budget_left; then
       BRAINS_CRED_TRUNCATED=1
-      [ "$recfile" != "${store:-}" ] && _brains_discard "$recfile"
       continue
     fi
     if ! _brains_is_brains_server "$name" ||
        ! corigin=$(brains_origin "$url") ||
        [ "$corigin" != "$want" ]; then
-      # Only a record file PRIVATE to this row may be discarded here. The Claude
-      # store and the Codex array backend both name one shared snapshot on every
-      # row, and deleting that on the first non-matching row destroys the
-      # document the winner still needs. Keyed on shared-ness itself rather than
-      # on the client, because keying it on the client is what let the array
-      # backend reintroduce the bug after the Claude path was fixed.
-      [ "$recfile" != "${store:-}" ] && _brains_discard "$recfile"
       continue
     fi
     matched="$matched$key
-"
-    matchedfiles="$matchedfiles$recfile
 "
     count=$((count + 1))
   done <<EOF2
@@ -789,29 +686,9 @@ EOF2
   # holding one bearer into an ambiguity and switched capture off for a
   # credential that was never ambiguous.
   if [ "$count" -gt 1 ]; then
-    if [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ] && [ -n "${BRAINS_CODEX_CREDENTIALS_FILE:-}" ]; then
-      # Array backend: the matched keys are indices into one document.
-      count=$(jq -r --argjson keys "$(printf '%s' "$matched" | jq -Rs 'split("\n") | map(select(length>0) | tonumber)')" \
-        '(if type == "array" then . else [.] end) as $a
-         | [ $keys[] as $i | $a[$i].token_response.access_token ] | unique | length' \
-        "$store" 2>/dev/null)
-    elif [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ]; then
-      # Keychain backend: one private record file per account, and
-      # BRAINS_CRED_MAX_CANDIDATES caps that at eight. The earlier version piped
-      # the list through `xargs -0 -n 200 ... | tail -1`, which could never batch
-      # at that cap and would have reported the LAST batch's count rather than
-      # the union of all of them if it ever did — reading two aliases of one
-      # bearer as one credential in one batch and as an ambiguity in another. So
-      # the list becomes one argument vector, which at eight entries cannot
-      # split. The positional parameters are free here: $1 was read into `base`
-      # at the top and is not used again.
-      set --
-      while IFS= read -r mf; do
-        [ -n "$mf" ] && set -- "$@" "$mf"
-      done <<EOF4
-$matchedfiles
-EOF4
-      count=$(jq -s '[.[].token_response.access_token] | unique | length' "$@" 2>/dev/null)
+    if [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ]; then
+      count=$(jq -r --argjson keys "$(printf '%s' "$matched" | jq -Rs 'split("\n") | map(select(length>0))')" \
+        '[ $keys[] as $k | .[$k].access_token ] | unique | length' "$store" 2>/dev/null)
     else
       count=$(jq -r --argjson keys "$(printf '%s' "$matched" | jq -Rs 'split("\n") | map(select(length>0))')" \
         '[ $keys[] as $k | .mcpOAuth[$k].accessToken ] | unique | length' "$store" 2>/dev/null)
@@ -821,30 +698,10 @@ EOF4
   fi
   BRAINS_CRED_COUNT="$count"
 
-  # Metadata pass files are no longer needed once counting is done; the winner's
-  # is kept just long enough to generate the config below.
-  #
-  # Same shared-ness rule as the selection loop: a row naming the shared store
-  # snapshot is skipped, because that document is discarded once on its own and
-  # sweeping it here would pull it out from under config generation. The path
-  # confinement that used to be repeated here now lives in _brains_discard.
-  _brains_discard_matched() {
-    local f keep
-    keep="${1:-}"
-    while IFS= read -r f; do
-      [ -n "$f" ] || continue
-      [ "$f" = "$keep" ] && continue
-      [ "$f" = "${store:-}" ] && continue
-      _brains_discard "$f"
-    done <<EOF3
-$matchedfiles
-EOF3
-  }
-
   # ---- the single decision point. I2: indeterminate unless proven otherwise.
   if [ "$BRAINS_CRED_TRUNCATED" = "1" ]; then
     BRAINS_CRED_STATE="indeterminate"
-    _brains_discard "${store:-}"; _brains_discard_matched
+    _brains_discard "${store:-}"
     return 1
   fi
   if [ "$count" -eq 0 ]; then
@@ -857,12 +714,12 @@ EOF3
     else
       BRAINS_CRED_STATE="no-credential"
     fi
-    _brains_discard "${store:-}"; _brains_discard_matched
+    _brains_discard "${store:-}"
     return 1
   fi
   if [ "$count" -gt 1 ]; then
     BRAINS_CRED_STATE="indeterminate"
-    _brains_discard "${store:-}"; _brains_discard_matched
+    _brains_discard "${store:-}"
     return 1
   fi
 
@@ -870,18 +727,11 @@ EOF3
 *}"
   BRAINS_CRED_LOCATOR="$key"
   if [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ]; then
-    # The winning record is already on disk from the metadata pass.
-    recfile="${matchedfiles%%
-*}"
-    _brains_discard_matched "$recfile"
-    if [ -n "${BRAINS_CODEX_CREDENTIALS_FILE:-}" ]; then
-      _brains_write_config codex-oauth-array "$key" "$recfile" || {
-        _brains_discard "$recfile"; BRAINS_CRED_STATE="indeterminate"; return 1; }
-    else
-      _brains_write_config codex-oauth "" "$recfile" || {
-        _brains_discard "$recfile"; BRAINS_CRED_STATE="indeterminate"; return 1; }
-    fi
-    _brains_discard "$recfile"
+    _brains_write_config codex-oauth "$key" "$store" || {
+      _brains_discard "$store"
+      BRAINS_CRED_STATE="indeterminate"; return 1
+    }
+    _brains_discard "$store"
     BRAINS_CRED_SOURCE="codex-oauth"
   else
     _brains_write_config claude-oauth "$key" "$store" || {
@@ -1036,28 +886,13 @@ brains_health_claim_signal() {   # key, url
 # never signals: transient network trouble is not user-actionable, and a warning
 # that cries wolf on flaky wifi is how people learn to ignore the one that
 # matters.
-# Codex reads its MCP sign-in from the macOS keychain, and Codex on Linux is not
-# a supported configuration. So on that platform there is no SIGN-IN step to
-# name and _brains_signin_step echoes nothing, leaving the caller to drop the
-# remedy clause rather than invent one.
 #
-# What that does NOT mean is that nothing works there. The explicit-token branch
-# is platform-independent — BRAINS_API_TOKEN resolves and captures on Linux
-# exactly as it does on macOS — so a note claiming there is "nothing to change"
-# was measurably false, and core.md tells the agent these notes are
-# authoritative. The product decision stands; the wording now matches what the
-# code does.
-_brains_codex_unsupported_here() {
-  [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ] && ! command -v security >/dev/null 2>&1
-}
-
+# On Codex no note names a step. brains reads the Codex sign-in only from
+# Codex's credentials file while Codex signs in to the system keychain by
+# default, so "sign in" would be a remedy that does not turn capture on.
 _brains_signin_step() {
-  if [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ]; then
-    _brains_codex_unsupported_here && return 0
-    printf '%s' 'run `codex mcp login brains` — that sign-in is the credential'
-  else
-    printf '%s' 'run `claude mcp login plugin:brains:brains` — that sign-in is the credential'
-  fi
+  [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ] && return 0
+  printf '%s' 'run `claude mcp login plugin:brains:brains` — that sign-in is the credential'
 }
 
 # Two shapes, and the difference is whether an ACTION is attached.
@@ -1090,15 +925,20 @@ brains_capture_signal() {
     state=$(brains_health_state "$cap" "$url")
     case "$state" in
       no-credential)
-        if _brains_codex_unsupported_here; then
+        if [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ]; then
           _brains_emit_note no-credential "$url" 'Conversation capture and the brains inbox' \
-            "brains reads the Codex sign-in from the macOS keychain, and there is none to read on this platform. An explicit \`BRAINS_API_TOKEN\` does turn capture on here, but Codex on this platform is not a configuration brains supports, so brains does not ask you to set one." && return 0
+            "no capture credential resolved. brains reads the Codex sign-in for brains only from Codex's credentials file (\`.credentials.json\` under \`CODEX_HOME\`, \`~/.codex\` by default), and Codex keeps MCP sign-ins in the system keychain by default. brains does not read the keychain from a hook, because that can raise a password prompt." && return 0
           return 1
         fi
         _brains_emit_signal no-credential "$url" 'Conversation capture and the brains inbox' \
           "no capture credential resolved. To turn it on, $step." && return 0
         return 1 ;;
       indeterminate)
+        if [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ]; then
+          _brains_emit_note indeterminate "$url" 'Conversation capture and the brains inbox' \
+            "brains could not determine which stored Codex sign-in belongs to this endpoint — more than one may match it, or the store could not be read in full." && return 0
+          return 1
+        fi
         _brains_emit_signal indeterminate "$url" 'Conversation capture and the brains inbox' \
           "brains could not determine which stored credential belongs to this endpoint — more than one may match it, or the store could not be read in full. Set the plugin's \`token\` option explicitly, or if you have signed into brains twice, remove the duplicate MCP server entry." && return 0
         return 1 ;;
@@ -1113,15 +953,20 @@ brains_capture_signal() {
     case "$state" in
       rejected)
         if [ -z "$step" ]; then
-          _brains_emit_signal "rejected-$cap" "$url" "$label" \
+          _brains_emit_note "rejected-$cap" "$url" "$label" \
             "the capture credential was refused by the server." && return 0
-          return 1
-        fi
-        _brains_emit_signal "rejected-$cap" "$url" "$label" \
-          "the capture credential was refused by the server. To re-issue it, $step." && return 0 ;;
+        else
+          _brains_emit_signal "rejected-$cap" "$url" "$label" \
+            "the capture credential was refused by the server. To re-issue it, $step." && return 0
+        fi ;;
       blocked)
-        _brains_emit_signal "blocked-$cap" "$url" "$label" \
-          "this endpoint is a different host from the brains server you are signed into, so the stored credential was not used. Set the plugin's \`token\` option to a token for this endpoint." && return 0 ;;
+        if [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ]; then
+          _brains_emit_note "blocked-$cap" "$url" "$label" \
+            "this endpoint is a different host from the brains server you are signed into, so the stored credential was not used." && return 0
+        else
+          _brains_emit_signal "blocked-$cap" "$url" "$label" \
+            "this endpoint is a different host from the brains server you are signed into, so the stored credential was not used. Set the plugin's \`token\` option to a token for this endpoint." && return 0
+        fi ;;
     esac
   done
   return 1
