@@ -1668,8 +1668,10 @@ for (const signal of [
   assert(readSkillNormalized.includes(signal), `brains-read is missing live-search signal: ${signal}`);
 }
 assert(!readSkillNormalized.includes("gmail-inbox `query_emails`"), "brains-read names `query_emails` for Gmail; the gmail action is `search_emails`");
+const OUTLOOK_PERSONAL_CAVEAT =
+  "`search_messages` to find mail (Microsoft 365 accounts only; on an outlook.com or hotmail.com account use `query_emails` or `list_messages` on one folder)";
 assert(
-  readSkillNormalized.includes("`search_messages` to find mail (Microsoft 365 accounts only; on an outlook.com or hotmail.com account use `query_emails` or `list_messages` on one folder)"),
+  readSkillNormalized.includes(OUTLOOK_PERSONAL_CAVEAT) && writeSkillNormalized.includes(OUTLOOK_PERSONAL_CAVEAT),
   "brains-read must carry the same Outlook personal-account caveat as brains-write",
 );
 
