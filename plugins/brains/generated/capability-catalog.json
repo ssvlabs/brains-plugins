@@ -9,13 +9,13 @@
       "capability_id": "integration-actions",
       "catalog_sha256": "6f0d1845064970b89e9e623e838314f57fe4c77393637224720f36fe48dbf2be",
       "artifact_path": "plugins/brains/skills/brains-write/SKILL.md",
-      "artifact_sha256": "90c939a5d8358dee74a8a1d4e30ea1950e3ad786f746bd49d078d4516f06876e"
+      "artifact_sha256": "075fc725ec676a4af71f70e8d72c6c25baed706a9f83bc4d53e32b8bff1b9a38"
     },
     {
       "capability_id": "brains-features",
-      "catalog_sha256": "679169b9e149e2a072d3761617a28d231ad2be884740f7dc6a4c5e0e05faf4a2",
+      "catalog_sha256": "dba4be54c2492259bed3a05683af665c98d7de0562cac8017917588680f5e4ef",
       "artifact_path": "plugins/brains/skills/brains-build/SKILL.md",
-      "artifact_sha256": "e912d7f77a1cc7b8a62ef86f9fa40e8f175e7c9bfaebc6674df34ca66dfa2217"
+      "artifact_sha256": "bb2c369faf49c884f332bfdc8a10890dbe66ae4d7a99859066a46096dfaeaf90"
     },
     {
       "capability_id": "procedure:board",
@@ -36,5 +36,5 @@
       "artifact_sha256": "3e95e12643ff463594f7ac1ffc8ad7a0120011e20d789bf5921db16d6059b153"
     }
   ],
-  "source_commit": "fcc4526eb03cb6d88d270651daac26c7711f1bc8"
+  "source_commit": "7d10a9be48b8b8d7a797da640f9cb235a55c76d0"
 }

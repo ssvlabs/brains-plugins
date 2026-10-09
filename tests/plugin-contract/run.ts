@@ -1667,7 +1667,13 @@ for (const signal of [
 ]) {
   assert(readSkillNormalized.includes(signal), `brains-read is missing live-search signal: ${signal}`);
 }
-assert(!readSkillNormalized.includes("query_emails"), "brains-read names `query_emails`; the gmail action is `search_emails`");
+assert(!readSkillNormalized.includes("gmail-inbox `query_emails`"), "brains-read names `query_emails` for Gmail; the gmail action is `search_emails`");
+const OUTLOOK_PERSONAL_CAVEAT =
+  "`search_messages` to find mail (Microsoft 365 accounts only; on an outlook.com or hotmail.com account use `query_emails` or `list_messages` on one folder)";
+assert(
+  readSkillNormalized.includes(OUTLOOK_PERSONAL_CAVEAT) && writeSkillNormalized.includes(OUTLOOK_PERSONAL_CAVEAT),
+  "brains-read must carry the same Outlook personal-account caveat as brains-write",
+);
 
 // The whole rendered action contract, pinned verbatim. The `includes` assertions
 // below stay — they name WHICH rule broke, which "the paragraph changed" cannot —
@@ -1706,8 +1712,9 @@ const WRITE_ACTION_CONTRACT_REGION = [
   "`requires_confirmation:true` normally drafts for out-of-band approval;",
   "`requires_confirmation:false` runs inline. A user may additionally enable direct",
   "execution in their brains settings, in which case a short allowlist of actions —",
-  "private creates, and explicit sends whose recipients the server bounds to",
-  "addresses or channels the person has already sent to — also runs inline when",
+  "creates that stay within the audience their destination already has, and",
+  "explicit sends whose recipients the server bounds to addresses or channels the",
+  "person has already sent to — also runs inline when",
   "called from an eligible client signed in from the user's own computer (CLI clients such as Claude Code and Codex) — every execution",
   "is still recorded in /inbox. The mode is decided server-side per call, so treat",
   "any call as potentially executing and never assume a `draft_id`. Get the user's",
