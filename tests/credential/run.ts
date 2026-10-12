@@ -666,19 +666,18 @@ section("the off-state signal — once per cause, cleared only by an observed su
   // credentials file while Codex signs in to the system keychain by default, so
   // "sign in" is a step the user can repeat forever without changing anything.
   // The text is pinned whole, and is the same on a host with and without
-  // `security`: nothing about the note depends on the platform.
-  const TAIL = " There is nothing for you to offer here. Say it once if it is relevant and do not repeat it later in the session.<!-- /brains:capture -->";
+  // `security`: nothing about the note depends on the platform. Codex captures
+  // over its MCP sign-in, so every note is about the inbox and carries the
+  // inbox tag, never the one core.md reads as capture being off.
+  const TAIL = " There is nothing for you to offer here. Say it once if it is relevant and do not repeat it later in the session.<!-- /brains:inbox -->";
   const NOTES: Array<[string, string, string, string]> = [
-    ["no-credential", "ingest", "Conversation capture and the brains inbox",
-      "no capture credential resolved. brains reads the Codex sign-in for brains only from Codex's credentials file (`.credentials.json` under `CODEX_HOME`, `~/.codex` by default), and Codex keeps MCP sign-ins in the system keychain by default. brains does not read the keychain from a hook, because that can raise a password prompt."],
-    ["indeterminate", "ingest", "Conversation capture and the brains inbox",
+    ["no-credential", "inbox", "The brains inbox",
+      "no inbox credential resolved. brains reads the Codex sign-in for the inbox only from Codex's credentials file (`.credentials.json` under `CODEX_HOME`, `~/.codex` by default), and Codex keeps MCP sign-ins in the system keychain by default. brains does not read the keychain from a hook, because that can raise a password prompt."],
+    ["indeterminate", "inbox", "The brains inbox",
       "brains could not determine which stored Codex sign-in belongs to this endpoint — more than one may match it, or the store could not be read in full."],
-    ["blocked", "ingest", "Conversation capture",
-      "this endpoint is a different host from the brains server you are signed into, so the stored credential was not used."],
     ["blocked", "inbox", "The brains inbox",
       "this endpoint is a different host from the brains server you are signed into, so the stored credential was not used."],
-    ["rejected", "ingest", "Conversation capture", "the capture credential was refused by the server."],
-    ["rejected", "inbox", "The brains inbox", "the capture credential was refused by the server."],
+    ["rejected", "inbox", "The brains inbox", "the inbox credential was refused by the server."],
   ];
   const signal = (rig: CodexRig, notes: string, env = rig.env) => sh(
     `BRAINS_CRED_CLIENT=codex\nbrains_resolve_endpoints "${ORIGIN}"\n${notes}brains_capture_signal`,
@@ -689,7 +688,7 @@ section("the off-state signal — once per cause, cleared only by an observed su
   for (const [st, cap, label, text] of NOTES) {
     const rig = codexRig();
     const got = signal(rig, noteFor(st, cap));
-    const want = `<!-- brains:capture -->${label} is OFF: ${text}${TAIL}`;
+    const want = `<!-- brains:inbox -->${label} is OFF: ${text}${TAIL}`;
     check(`the Codex ${st} note for ${cap} is the exact no-remedy text`, got === want, got.slice(0, 200));
     check("...and names no command, option or token, and carries no offer",
       !/mcp login|`token` option|BRAINS_API_TOKEN|Offer this to the user/.test(got) &&
@@ -698,33 +697,55 @@ section("the off-state signal — once per cause, cleared only by an observed su
   }
   {
     const rig = codexRig();
-    const withSecurity = signal(rig, noteFor("no-credential", "ingest"));
+    const withSecurity = signal(rig, noteFor("no-credential", "inbox"));
     const bare = codexRig();
-    const without = signal(bare, noteFor("no-credential", "ingest"), { ...bare.env, PATH: noSecurity });
+    const without = signal(bare, noteFor("no-credential", "inbox"), { ...bare.env, PATH: noSecurity });
     check("the Codex no-credential note is identical with and without `security` on PATH",
       withSecurity !== "" && withSecurity === without, `${withSecurity.slice(0, 80)} vs ${without.slice(0, 80)}`);
   }
   {
     // Once per cause, and re-armed only by an observed success.
     const rig = codexRig();
-    const first = signal(rig, noteFor("no-credential", "ingest"));
+    const first = signal(rig, noteFor("no-credential", "inbox"));
     const second = signal(rig, "");
-    signal(rig, `g=$(brains_health_begin ingest "$BRAINS_URL_INGEST"); brains_health_apply ingest "$BRAINS_URL_INGEST" "$g" ok\n`);
-    const again = signal(rig, noteFor("no-credential", "ingest"));
+    signal(rig, `g=$(brains_health_begin inbox "$BRAINS_URL_INBOX"); brains_health_apply inbox "$BRAINS_URL_INBOX" "$g" ok\n`);
+    const again = signal(rig, noteFor("no-credential", "inbox"));
     check("the Codex no-credential note is claimed once and released by an observed success",
       first.includes("is OFF") && second === "" && again === first, `${second} / ${again.slice(0, 80)}`);
   }
   {
-    // A refusal already announced for capture must not swallow a different
-    // cause on the inbox: with no step to name, the rejected arm used to return
-    // instead of falling through to the next capability.
+    // An ingest state left by an older Codex install must not mask a live
+    // inbox cause.
     const rig = codexRig();
     signal(rig, noteFor("rejected", "ingest"));
     const next = signal(rig, noteFor("blocked", "inbox"));
-    check("after a Codex capture refusal is announced, a blocked inbox is still announced",
-      next.startsWith("<!-- brains:capture -->The brains inbox is OFF: this endpoint is a different host"),
+    check("with a stale Codex capture refusal on record, a blocked inbox is still announced",
+      next.startsWith("<!-- brains:inbox -->The brains inbox is OFF: this endpoint is a different host"),
       next.slice(0, 160) || "(nothing)");
   }
+  // Codex captures in its mcp_tool hooks, so an ingest state on Codex can only
+  // be stale, from before the upgrade, and must never raise a note — not once,
+  // and not again after each inbox success releases the shared claim.
+  for (const st of ["no-credential", "rejected", "blocked"]) {
+    const rig = codexRig();
+    const inboxOk = `g=$(brains_health_begin inbox "$BRAINS_URL_INBOX"); brains_health_apply inbox "$BRAINS_URL_INBOX" "$g" ok\n`;
+    const first = signal(rig, noteFor(st, "ingest") + inboxOk);
+    const again = signal(rig, inboxOk);
+    check(`a stale Codex ${st} capture state raises no note, before or after an inbox success`,
+      first === "" && again === "", `${first.slice(0, 80)} / ${again.slice(0, 80)}`);
+  }
+}
+{
+  // The stale-state rule is Codex-only: Claude Code still captures through the
+  // ingest request, so its refusal is still announced, as capture, with a step.
+  const r = sh(
+    `brains_resolve_endpoints "${ORIGIN}"\nbrains_health_note ingest "$BRAINS_URL_INGEST" rejected\nbrains_capture_signal`,
+    { state: freshState() },
+  );
+  check("a Claude Code capture refusal is still announced as capture",
+    r.stdout.startsWith("<!-- brains:capture -->Conversation capture is OFF: the capture credential was refused by the server.") &&
+      r.stdout.includes("claude mcp login plugin:brains:brains"),
+    r.stdout.trim().slice(0, 160) || "(nothing)");
 }
 {
   // The claim the note above must stay consistent with: that same host DOES
@@ -867,8 +888,7 @@ section("fail-safe — a hostile or broken store degrades to today's behaviour")
 section("network calls are bounded — no call site can opt out");
 {
   // A socket that accepts and then never answers. This is the shape that hangs
-  // a hook rather than failing it, and it is worst on Codex, whose Stop hook
-  // waits for the assistant POST. The default belongs inside brains_request
+  // a hook rather than failing it. The default belongs inside brains_request
   // precisely because ingest — the one call site outside the inbox lib — is how
   // the original `--max-time 5` came to be dropped in the first place.
   // Served by the shared stub process on a kernel-chosen port, for the same
@@ -1213,8 +1233,8 @@ section("Codex: no hook runs `security`, at session start, on a prompt, or at st
   const START = join(PLUGIN, "hooks", "brains-start.sh");
   const hooks: Array<[string, string, unknown, string]> = [
     ["SessionStart", START, { session_id: "nokc" }, "inbox"],
-    ["UserPromptSubmit", TURN, { session_id: "nokc", prompt: "hello" }, "ingest"],
-    ["Stop", TURN, { session_id: "nokc", last_assistant_message: "answer" }, "ingest"],
+    ["UserPromptSubmit", TURN, { session_id: "nokc", prompt: "hello" }, "inbox"],
+    ["Stop", TURN, { session_id: "nokc", last_assistant_message: "answer" }, "inbox"],
   ];
   let n = 0;
   for (const [event, script, payload, cap] of hooks) {
@@ -1360,9 +1380,10 @@ section("the turn hook's other halves — time injection, the off-state record, 
       sig.stdout.trim().slice(0, 160) || "(nothing recorded)");
   }
 
-  // 3. The client the hook declares to the resolver. On Codex this selects a
-  //    different store entirely, so dropping it silently sends a Codex user to
-  //    the Claude store.
+  // 3. The client declared to the resolver. On Codex this selects a different
+  //    store entirely, so dropping it silently sends a Codex user to the Claude
+  //    store. The turn hook runs only the inbox there; capture is the mcp_tool
+  //    hook's.
   {
     const state = freshState();
     const store = fixture("client-decl-store", {
@@ -1378,17 +1399,32 @@ section("the turn hook's other halves — time injection, the off-state record, 
       CODEX_HOME: rig.home,
       PATH: rig.env.PATH,
     });
-    let posts: Hit[] = [];
-    for (let i = 0; i < 30 && posts.length === 0; i++) {
-      spawnSync("sleep", ["0.1"]);
-      posts = readHits().slice(mark).filter((h) => h.path === "/ingest/claude");
-    }
-    // Two things at once, and both were unguarded: the hook declares the client
-    // to the resolver, so the CODEX store is the one read; and the Codex
-    // assistant POST is synchronous, so it has already landed when the hook
-    // returns rather than being backgrounded.
-    check("under Codex the hook resolves from the Codex store, not the Claude one",
-      posts[0]?.auth === "Bearer tok-codex-store", posts[0]?.auth ?? "(no request)");
+    // An ingest request would be backgrounded, so give one time to land.
+    spawnSync("sleep", ["1"]);
+    const hits = readHits().slice(mark);
+    const inbox = hits.filter((h) => h.path.startsWith("/inbox/claude"));
+    check("under Codex the inbox resolves from the Codex store, not the Claude one",
+      inbox.length > 0 && inbox.every((h) => h.auth === "Bearer tok-codex-store"),
+      inbox.map((h) => h.auth).join(" / ") || "(no request)");
+    check("...and the turn hook sends no capture request under Codex",
+      !hits.some((h) => h.path === "/ingest/claude"),
+      hits.map((h) => h.path).join(" / "));
+  }
+
+  //    A Stop that a stop hook forced to continue is not the end of the turn,
+  //    so the inbox does not drain on it; the plain Stop after it does.
+  {
+    const rig = codexRig({ "brains|0123456789abcdef": codexEntry("tok-codex-active") });
+    const codexEnv = { PLUGIN_ROOT: PLUGIN, BRAINS_CREDENTIAL_STORE_DISABLED: "", CODEX_HOME: rig.home, PATH: rig.env.PATH };
+    const inboxHits = (from: number) => readHits().slice(from).filter((h) => h.path.startsWith("/inbox/claude")).length;
+    const mark = readHits().length;
+    runTurn({ session_id: "stopactive", last_assistant_message: "answer", stop_hook_active: true }, rig.state, codexEnv);
+    const forced = inboxHits(mark);
+    const mark2 = readHits().length;
+    runTurn({ session_id: "stopactive", last_assistant_message: "answer", stop_hook_active: false }, rig.state, codexEnv);
+    const plain = inboxHits(mark2);
+    check("under Codex a hook-forced Stop drains no inbox, and the next plain Stop does",
+      forced === 0 && plain > 0, `forced=${forced} plain=${plain}`);
   }
 
   // 4. The blocked outcome word in the log. A cross-origin refusal has to be
@@ -1805,8 +1841,8 @@ const MUTATIONS: Mutation[] = [
     // gone.
     label: "the turn hook's ingest-lease cleanup (trap + explicit return)",
     file: "hooks/brains-turn.sh",
-    find: `      trap 'brains_cred_return "$_lease"' EXIT\n      ingest_once "$role" "$payload"\n      brains_cred_return "$_lease" ) &`,
-    replace: `      ingest_once "$role" "$payload" ) &`,
+    find: `    trap 'brains_cred_return "$_lease"' EXIT\n    ingest_once "$role" "$payload"\n    brains_cred_return "$_lease" ) &`,
+    replace: `    ingest_once "$role" "$payload" ) &`,
     // Answers TWO questions, because "no lease left behind" alone is also what a
     // hook that never took one says. `posts` is read off the stub's receipt log
     // and proves the backgrounded request really happened; `leases` is the
