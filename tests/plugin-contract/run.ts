@@ -343,7 +343,8 @@ const CODEX_INSTALL_REGION = [
   "",
   "No token needed — Codex signs itself in.",
   "",
-  "Needs Codex **" + CODEX_MIN_VERSION + "** or newer. Check with:",
+  "Needs Codex **" + CODEX_MIN_VERSION + "** or newer. Codex 0.131 to 0.148 still runs the tools,",
+  "recall and the inbox, but does not capture turns. Check with:",
   "",
   "```sh",
   CODEX_CAPABILITY_PROBE,
@@ -368,9 +369,9 @@ const CODEX_INSTALL_REGION = [
   "runs recall, capture, inbox delivery and error feedback. Trust them again after",
   "an upgrade that adds or changes a hook. Version 2.11.0 added the two capture",
   "hooks, so after upgrading to it capture stays off until you trust those two,",
-  "while the hooks you trusted before keep running. `codex exec` runs only trusted",
-  "hooks unless started with `--bypass-hook-trust`. To check what has been",
-  "captured, ask brains which chats it has, or run `list_pages type=chat_session`.",
+  "while the hooks you trusted before keep running. `codex exec` runs only hooks",
+  "you have trusted. To check what has been captured, ask brains which chats it",
+  "has, or run `list_pages type=chat_session`.",
   "",
   // Capture rides the MCP connection, keychain included; only the inbox script
   // reads Codex's credentials file, so only the inbox depends on the store.
@@ -1138,8 +1139,8 @@ for (const [event, input] of Object.entries(CODEX_CAPTURE_INPUTS)) {
   );
   // Both events wait for the call, so a stalled server must not hold the turn for long.
   assert(
-    Number.isInteger(handler.timeout) && handler.timeout >= 1 && handler.timeout <= 10,
-    `Codex capture ${event} timeout must be whole seconds from 1 to 10 — got ${handler.timeout}`,
+    Number.isInteger(handler.timeout) && handler.timeout >= 1 && handler.timeout <= 5,
+    `Codex capture ${event} timeout must be whole seconds from 1 to 5 — got ${handler.timeout}`,
   );
   assert(
     typeof handler.statusMessage === "string" && handler.statusMessage.trim() !== "",

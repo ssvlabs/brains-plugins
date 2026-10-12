@@ -76,10 +76,11 @@ _brains_cred_deadline_at=0
 
 # Default network ceilings. These live HERE, not at the call sites, because a
 # call site that forgets one is unbounded: ingest lost its `--max-time 5` in
-# exactly that way, and ingest is the path Codex runs synchronously during Stop,
-# where a server that accepts and never answers hangs the hook forever. curl
-# honours the LAST occurrence of a repeated flag, so a caller can still tighten
-# either value by passing its own.
+# exactly that way. Inbox requests run inside the hook, where a server that
+# accepts and never answers hangs it forever, and Claude Code's backgrounded
+# ingest would hold its credential lease just as long. curl honours the LAST
+# occurrence of a repeated flag, so a caller can still tighten either value by
+# passing its own.
 BRAINS_CRED_CONNECT_TIMEOUT=5
 BRAINS_CRED_MAX_TIME=10
 

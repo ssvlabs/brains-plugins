@@ -14,7 +14,8 @@ authentication declarations are client-specific.
 
 No token needed — Codex signs itself in.
 
-Needs Codex **0.149** or newer. Check with:
+Needs Codex **0.149** or newer. Codex 0.131 to 0.148 still runs the tools,
+recall and the inbox, but does not capture turns. Check with:
 
 ```sh
 codex --version
@@ -39,9 +40,9 @@ plugin loads, open `/hooks` and trust the bundled brains hooks — that is what
 runs recall, capture, inbox delivery and error feedback. Trust them again after
 an upgrade that adds or changes a hook. Version 2.11.0 added the two capture
 hooks, so after upgrading to it capture stays off until you trust those two,
-while the hooks you trusted before keep running. `codex exec` runs only trusted
-hooks unless started with `--bypass-hook-trust`. To check what has been
-captured, ask brains which chats it has, or run `list_pages type=chat_session`.
+while the hooks you trusted before keep running. `codex exec` runs only hooks
+you have trusted. To check what has been captured, ask brains which chats it
+has, or run `list_pages type=chat_session`.
 
 Capture uses the brains sign-in the same way the tools do, wherever Codex keeps
 it. The inbox reads that sign-in only from Codex's credentials file

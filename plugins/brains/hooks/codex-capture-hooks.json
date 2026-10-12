@@ -13,7 +13,7 @@
               "content": "${prompt}",
               "client": "codex"
             },
-            "timeout": 10,
+            "timeout": 5,
             "statusMessage": "Saving turn to brains"
           }
         ]
@@ -32,7 +32,7 @@
               "content": "${last_assistant_message}",
               "client": "codex"
             },
-            "timeout": 10,
+            "timeout": 5,
             "statusMessage": "Saving turn to brains"
           }
         ]
