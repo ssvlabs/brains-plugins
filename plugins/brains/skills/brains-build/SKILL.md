@@ -17,6 +17,7 @@ Don't restate that artifact here — open it.
 | **Board skill** | A named, saved LLM action over a board's rows. | `create_board_skill` |
 | **Board form** | A shareable page where someone else answers your questions in chat — one board row per submission. | `create_board_form` |
 | **Bulk upload** | Load a large or arbitrary-format file into a board without reading it into context. | `create_import_grant` → `bulk_append_rows` |
+| **Attach a file** | Attach a local file (image, PDF, doc) to a board without its bytes passing through the conversation. | `create_board_file_upload` |
 | **Dashboard** | A live, interactive view of a board that you author as a full HTML app. | `get_dashboard` → `set_dashboard` |
 | **Page** | A first-class note in a brain. | `create_page` |
 | **Automation** | A sandboxed TS program on a cron schedule with a scoped token. | `create_agent_flow` if your client exposes it (follow the playbook it returns), otherwise the Agents page (`/agents`) |
