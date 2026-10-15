@@ -76,10 +76,11 @@ _brains_cred_deadline_at=0
 
 # Default network ceilings. These live HERE, not at the call sites, because a
 # call site that forgets one is unbounded: ingest lost its `--max-time 5` in
-# exactly that way, and ingest is the path Codex runs synchronously during Stop,
-# where a server that accepts and never answers hangs the hook forever. curl
-# honours the LAST occurrence of a repeated flag, so a caller can still tighten
-# either value by passing its own.
+# exactly that way. Inbox requests run inside the hook, where a server that
+# accepts and never answers hangs it forever, and Claude Code's backgrounded
+# ingest would hold its credential lease just as long. curl honours the LAST
+# occurrence of a repeated flag, so a caller can still tighten either value by
+# passing its own.
 BRAINS_CRED_CONNECT_TIMEOUT=5
 BRAINS_CRED_MAX_TIME=10
 
@@ -889,7 +890,7 @@ brains_health_claim_signal() {   # key, url
 #
 # On Codex no note names a step. brains reads the Codex sign-in only from
 # Codex's credentials file while Codex signs in to the system keychain by
-# default, so "sign in" would be a remedy that does not turn capture on.
+# default, so "sign in" would be a remedy that does not turn the inbox on.
 _brains_signin_step() {
   [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ] && return 0
   printf '%s' 'run `claude mcp login plugin:brains:brains` — that sign-in is the credential'
@@ -908,26 +909,31 @@ _brains_emit_signal() {  # key, url, label, remedy
   return 0
 }
 
+# Only Codex reaches this, and Codex captures over its own MCP sign-in, so the
+# note is about the inbox and must not carry the tag core.md reads as capture.
 _brains_emit_note() {    # key, url, label, explanation
   brains_health_claim_signal "$1" "$2" || return 1
-  printf '%s\n' '<!-- brains:capture -->'"$3"' is OFF: '"$4"' There is nothing for you to offer here. Say it once if it is relevant and do not repeat it later in the session.<!-- /brains:capture -->'
+  printf '%s\n' '<!-- brains:inbox -->'"$3"' is OFF: '"$4"' There is nothing for you to offer here. Say it once if it is relevant and do not repeat it later in the session.<!-- /brains:inbox -->'
   return 0
 }
 
 brains_capture_signal() {
-  local cap url state step label
+  local cap url state step label caps
   step=$(_brains_signin_step)
+  caps="ingest inbox"
+  # Codex capture runs in its mcp_tool hooks; an ingest state here is stale.
+  [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ] && caps="inbox"
 
   # Resolution-level causes first: they explain every capability at once, so
   # they get one message rather than one per endpoint.
-  for cap in ingest inbox; do
+  for cap in $caps; do
     [ "$cap" = "ingest" ] && url="$BRAINS_URL_INGEST" || url="$BRAINS_URL_INBOX"
     state=$(brains_health_state "$cap" "$url")
     case "$state" in
       no-credential)
         if [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ]; then
-          _brains_emit_note no-credential "$url" 'Conversation capture and the brains inbox' \
-            "no capture credential resolved. brains reads the Codex sign-in for brains only from Codex's credentials file (\`.credentials.json\` under \`CODEX_HOME\`, \`~/.codex\` by default), and Codex keeps MCP sign-ins in the system keychain by default. brains does not read the keychain from a hook, because that can raise a password prompt." && return 0
+          _brains_emit_note no-credential "$url" 'The brains inbox' \
+            "no inbox credential resolved. brains reads the Codex sign-in for the inbox only from Codex's credentials file (\`.credentials.json\` under \`CODEX_HOME\`, \`~/.codex\` by default), and Codex keeps MCP sign-ins in the system keychain by default. brains does not read the keychain from a hook, because that can raise a password prompt." && return 0
           return 1
         fi
         _brains_emit_signal no-credential "$url" 'Conversation capture and the brains inbox' \
@@ -935,7 +941,7 @@ brains_capture_signal() {
         return 1 ;;
       indeterminate)
         if [ "${BRAINS_CRED_CLIENT:-claude}" = "codex" ]; then
-          _brains_emit_note indeterminate "$url" 'Conversation capture and the brains inbox' \
+          _brains_emit_note indeterminate "$url" 'The brains inbox' \
             "brains could not determine which stored Codex sign-in belongs to this endpoint — more than one may match it, or the store could not be read in full." && return 0
           return 1
         fi
@@ -946,7 +952,7 @@ brains_capture_signal() {
   done
 
   # Endpoint-level causes: one capability can be broken while another works.
-  for cap in ingest inbox; do
+  for cap in $caps; do
     [ "$cap" = "ingest" ] && url="$BRAINS_URL_INGEST" || url="$BRAINS_URL_INBOX"
     [ "$cap" = "ingest" ] && label="Conversation capture" || label="The brains inbox"
     state=$(brains_health_state "$cap" "$url")
@@ -954,7 +960,7 @@ brains_capture_signal() {
       rejected)
         if [ -z "$step" ]; then
           _brains_emit_note "rejected-$cap" "$url" "$label" \
-            "the capture credential was refused by the server." && return 0
+            "the inbox credential was refused by the server." && return 0
         else
           _brains_emit_signal "rejected-$cap" "$url" "$label" \
             "the capture credential was refused by the server. To re-issue it, $step." && return 0

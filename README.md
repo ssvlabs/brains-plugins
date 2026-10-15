@@ -14,13 +14,14 @@ authentication declarations are client-specific.
 
 No token needed — Codex signs itself in.
 
-Needs Codex **0.131** or newer. Check with:
+Needs Codex **0.149** or newer. Codex 0.131 to 0.148 still runs the tools,
+recall and the inbox, but does not capture turns. Check with:
 
 ```sh
-codex plugin --help
+codex --version
 ```
 
-If that errors with an unknown subcommand, run `codex update` first.
+If it prints an older version, run `codex update` first.
 
 ```sh
 codex plugin marketplace add ssvlabs/brains-plugins
@@ -36,15 +37,20 @@ keep. Confirm with `codex mcp list`: brains should read **OAuth**.
 
 Restart the ChatGPT desktop app or start a new Codex thread. The first time the
 plugin loads, open `/hooks` and trust the bundled brains hooks — that is what
-runs automatic recall and error feedback. Capture and inbox delivery use the
-sign-in above wherever they can read it; the next paragraph says where that is.
+runs recall, capture, inbox delivery and error feedback. Trust them again after
+an upgrade that adds or changes a hook. Version 2.11.0 added the two capture
+hooks, so after upgrading to it capture stays off until you trust those two,
+while the hooks you trusted before keep running. `codex exec` runs only hooks
+you have trusted. To check what has been captured, ask brains which chats it
+has, or run `list_pages type=chat_session`.
 
-Capture and the inbox read the brains sign-in only from Codex's credentials file
+Capture uses the brains sign-in the same way the tools do, wherever Codex keeps
+it. The inbox reads that sign-in only from Codex's credentials file
 (`.credentials.json` under `CODEX_HOME`, `~/.codex` by default). Codex keeps MCP
 sign-ins in the system keychain by default, and brains does not read the
 keychain from a hook because that can raise a password prompt — so with the
-default store capture and the inbox stay off, and the plugin says so once. The
-tools and recall are unaffected. To turn capture and the inbox on, add
+default store the inbox stays off, and the plugin says so once. The tools,
+recall and capture are unaffected. To turn the inbox on, add
 `mcp_oauth_credentials_store = "file"` at the top of Codex's `config.toml`,
 before any `[section]`, and run `codex mcp login brains` again. That setting is
 global: from then on Codex keeps every MCP sign-in, not only brains, in
@@ -52,6 +58,10 @@ global: from then on Codex keeps every MCP sign-in, not only brains, in
 already in the keychain are not moved, so other MCP servers need
 `codex mcp login` again too. Codex on Linux is not a configuration brains
 supports or tests.
+
+Keep `memories.disable_on_external_context` in `config.toml` at its default,
+`false`. Set to `true`, Codex counts each capture hook call as external context
+and turns memories off for that thread.
 
 Everyday reading and writing is covered by default. For admin-gated tools or
 performance insights, sign in asking for them explicitly (both also need the
@@ -70,14 +80,13 @@ codex plugin add brains@brains
 codex mcp login brains
 ```
 
-### Optional: an explicit capture token
+### Optional: an explicit inbox token
 
-Capture and the inbox use the sign-in above wherever they can read it, and then
-need nothing else. To check what has been captured, ask brains which chats it
-has, or run `list_pages type=chat_session`.
+The inbox uses the sign-in above once it is in Codex's credentials file, and
+then needs nothing else.
 
-Set a token to capture into a different brains account, or to reach an endpoint
-your sign-in does not cover — find it in your brains account settings:
+Set a token to deliver the inbox from a different brains account, or to reach an
+endpoint your sign-in does not cover — find it in your brains account settings:
 
 ```sh
 export BRAINS_API_TOKEN="<your token>"
@@ -91,7 +100,8 @@ restart the app:
 launchctl setenv BRAINS_API_TOKEN "<your token>"
 ```
 
-This token is only for capture and the inbox. It is **not** how Codex
+This token is only for the inbox. Capture goes through the tools' sign-in, so
+the token does not change where turns are saved. It is **not** how Codex
 authenticates the brains tools — that is `codex mcp login brains` above.
 
 Running your own brains server? Set `BRAINS_ENDPOINT` alongside it — see
@@ -215,9 +225,10 @@ Changing `endpoint`'s `default` in your fork does not cover this. Claude Code ex
 an option you never set has no stored value — so the hooks fall back to
 `https://mcp.mybrains.ai` while your tools talk to your own server.
 
-Codex has no such option and runs the same hook scripts, so set `BRAINS_ENDPOINT` wherever
-you set `BRAINS_API_TOKEN` above — the shell Codex starts from, or the app's launch
-environment. Without it Codex capture keeps sending to `https://mcp.mybrains.ai` too.
+Codex has no such option. Its capture calls the server in `plugins/brains/.mcp.json`, so the
+fork above moves capture with the tools; the inbox reads `BRAINS_ENDPOINT` instead, so set it
+wherever you set `BRAINS_API_TOKEN` above — the shell Codex starts from, or the app's launch
+environment.
 
 ## License
 

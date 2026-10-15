@@ -17,11 +17,10 @@ const PLUGIN = join(ROOT, "plugins", "brains");
 const CODEX_MCP_SCOPES = ["read", "write"];
 const CODEX_MCP_KEYS = ["type", "url", "scopes"];
 
-// The oldest Codex that can run this install, and the command that proves it. The floor is set by
-// the `codex plugin` command surface — `codex mcp login` shipped much earlier, so probing the login
-// would pass on versions that then fail at `codex plugin marketplace add`.
-const CODEX_MIN_VERSION = "0.131";
-const CODEX_CAPABILITY_PROBE = "codex plugin --help";
+// The oldest Codex that runs the capture hooks, and the command that shows it. Older versions
+// install the plugin and skip or reject `mcp_tool` hooks, so no subcommand probe can prove the floor.
+const CODEX_MIN_VERSION = "0.149";
+const CODEX_CAPABILITY_PROBE = "codex --version";
 
 // Claude Code signs itself into the MCP server, so the login command is part of the contract:
 // the manifest copy, the README and the drift nudge must all name it WITH its plugin-scoped
@@ -221,6 +220,13 @@ const CODEX_HOOK_EVENTS: Record<string, HookGroup[]> = {
     },
   ],
 };
+// Codex capture: the `input` each event's mcp_tool hook sends to ingest_chat_turn. A whole-string
+// `${field}` keeps its JSON type, and the server rejects keys it does not know.
+const CODEX_CAPTURE_INPUTS: Record<string, Record<string, string>> = {
+  UserPromptSubmit: { session_id: "${session_id}", role: "user", content: "${prompt}", client: "codex" },
+  Stop: { session_id: "${session_id}", role: "assistant", content: "${last_assistant_message}", client: "codex" },
+};
+const CODEX_CAPTURE_HANDLER_KEYS = ["input", "server", "statusMessage", "timeout", "tool", "type"];
 const CLAUDE_WEB_HEADING = "## Install for claude.ai web";
 // The one URL a web reader needs; the connector dialog takes it verbatim.
 const CLAUDE_WEB_GUIDE = "https://app.mybrains.ai/install/claude-web";
@@ -337,13 +343,14 @@ const CODEX_INSTALL_REGION = [
   "",
   "No token needed — Codex signs itself in.",
   "",
-  "Needs Codex **" + CODEX_MIN_VERSION + "** or newer. Check with:",
+  "Needs Codex **" + CODEX_MIN_VERSION + "** or newer. Codex 0.131 to 0.148 still runs the tools,",
+  "recall and the inbox, but does not capture turns. Check with:",
   "",
   "```sh",
-  "codex plugin --help",
+  CODEX_CAPABILITY_PROBE,
   "```",
   "",
-  "If that errors with an unknown subcommand, run `codex update` first.",
+  "If it prints an older version, run `codex update` first.",
   "",
   "```sh",
   "codex plugin marketplace add ssvlabs/brains-plugins",
@@ -359,18 +366,22 @@ const CODEX_INSTALL_REGION = [
   "",
   "Restart the ChatGPT desktop app or start a new Codex thread. The first time the",
   "plugin loads, open `/hooks` and trust the bundled brains hooks — that is what",
-  "runs automatic recall and error feedback. Capture and inbox delivery use the",
-  "sign-in above wherever they can read it; the next paragraph says where that is.",
+  "runs recall, capture, inbox delivery and error feedback. Trust them again after",
+  "an upgrade that adds or changes a hook. Version 2.11.0 added the two capture",
+  "hooks, so after upgrading to it capture stays off until you trust those two,",
+  "while the hooks you trusted before keep running. `codex exec` runs only hooks",
+  "you have trusted. To check what has been captured, ask brains which chats it",
+  "has, or run `list_pages type=chat_session`.",
   "",
-  // The hooks read Codex's credentials file and never its keychain entry, so the
-  // copy says where the sign-in is read from rather than promising capture to
-  // every signed-in user.
-  "Capture and the inbox read the brains sign-in only from Codex's credentials file",
+  // Capture rides the MCP connection, keychain included; only the inbox script
+  // reads Codex's credentials file, so only the inbox depends on the store.
+  "Capture uses the brains sign-in the same way the tools do, wherever Codex keeps",
+  "it. The inbox reads that sign-in only from Codex's credentials file",
   "(`.credentials.json` under `CODEX_HOME`, `~/.codex` by default). Codex keeps MCP",
   "sign-ins in the system keychain by default, and brains does not read the",
   "keychain from a hook because that can raise a password prompt — so with the",
-  "default store capture and the inbox stay off, and the plugin says so once. The",
-  "tools and recall are unaffected. To turn capture and the inbox on, add",
+  "default store the inbox stays off, and the plugin says so once. The tools,",
+  "recall and capture are unaffected. To turn the inbox on, add",
   "`mcp_oauth_credentials_store = \"file\"` at the top of Codex's `config.toml`,",
   "before any `[section]`, and run `codex mcp login brains` again. That setting is",
   "global: from then on Codex keeps every MCP sign-in, not only brains, in",
@@ -378,6 +389,10 @@ const CODEX_INSTALL_REGION = [
   "already in the keychain are not moved, so other MCP servers need",
   "`codex mcp login` again too. Codex on Linux is not a configuration brains",
   "supports or tests.",
+  "",
+  "Keep `memories.disable_on_external_context` in `config.toml` at its default,",
+  "`false`. Set to `true`, Codex counts each capture hook call as external context",
+  "and turns memories off for that thread.",
   "",
   "Everyday reading and writing is covered by default. For admin-gated tools or",
   "performance insights, sign in asking for them explicitly (both also need the",
@@ -406,14 +421,13 @@ const CODEX_INSTALL_REGION = [
 // session, and server updates arrive there too.") passed the canary in the body. Editing stays
 // possible; it is now the deliberate two-line diff every other region in this file already demands.
 const CODEX_OPTIONAL_REGION = [
-  "### Optional: an explicit capture token",
+  "### Optional: an explicit inbox token",
   "",
-  "Capture and the inbox use the sign-in above wherever they can read it, and then",
-  "need nothing else. To check what has been captured, ask brains which chats it",
-  "has, or run `list_pages type=chat_session`.",
+  "The inbox uses the sign-in above once it is in Codex's credentials file, and",
+  "then needs nothing else.",
   "",
-  "Set a token to capture into a different brains account, or to reach an endpoint",
-  "your sign-in does not cover — find it in your brains account settings:",
+  "Set a token to deliver the inbox from a different brains account, or to reach an",
+  "endpoint your sign-in does not cover — find it in your brains account settings:",
   "",
   "```sh",
   "export BRAINS_API_TOKEN=\"<your token>\"",
@@ -427,7 +441,8 @@ const CODEX_OPTIONAL_REGION = [
   "launchctl setenv BRAINS_API_TOKEN \"<your token>\"",
   "```",
   "",
-  "This token is only for capture and the inbox. It is **not** how Codex",
+  "This token is only for the inbox. Capture goes through the tools' sign-in, so",
+  "the token does not change where turns are saved. It is **not** how Codex",
   "authenticates the brains tools — that is `codex mcp login brains` above.",
   "",
   "Running your own brains server? Set `BRAINS_ENDPOINT` alongside it — see",
@@ -549,9 +564,10 @@ const SELF_HOSTING_REGION = [
   "an option you never set has no stored value — so the hooks fall back to",
   "`" + CLAUDE_ENDPOINT + "` while your tools talk to your own server.",
   "",
-  "Codex has no such option and runs the same hook scripts, so set `BRAINS_ENDPOINT` wherever",
-  "you set `BRAINS_API_TOKEN` above — the shell Codex starts from, or the app's launch",
-  "environment. Without it Codex capture keeps sending to `" + CLAUDE_ENDPOINT + "` too.",
+  "Codex has no such option. Its capture calls the server in `plugins/brains/.mcp.json`, so the",
+  "fork above moves capture with the tools; the inbox reads `BRAINS_ENDPOINT` instead, so set it",
+  "wherever you set `BRAINS_API_TOKEN` above — the shell Codex starts from, or the app's launch",
+  "environment.",
 ].join("\n");
 
 // Best-effort canary over the WHOLE README, in the shape of the core.md backstop further down:
@@ -810,7 +826,10 @@ assert(claudeManifest.version === codexManifest.version, "client manifests must 
 assert(claudeManifest.hooks === "./hooks/claude-hooks.json", "Claude must select its event map explicitly");
 assert(codexManifest.skills === "./skills/", "Codex must use the shared skills directory");
 assert(codexManifest.mcpServers === "./.mcp.json", "Codex must load its MCP declaration");
-assert(!("hooks" in codexManifest), "Codex should discover the default hooks/hooks.json");
+assert(
+  JSON.stringify(codexManifest.hooks) === JSON.stringify(["./hooks/hooks.json", "./hooks/codex-capture-hooks.json"]),
+  "Codex must list both hook files — a hooks list replaces the default hooks/hooks.json discovery",
+);
 
 // Capture AND the inbox are hook-driven and credential-gated: brains-turn.sh and
 // brains-inbox.sh carry the same `[ -z "$TOKEN" ] && exit 0`, and neither runs in claude.ai chat.
@@ -908,6 +927,7 @@ const CODEX_MANIFEST = {
   keywords: ["memory", "productivity", "gmail", "calendar", "drive", "automation"],
   skills: "./skills/",
   mcpServers: "./.mcp.json",
+  hooks: ["./hooks/hooks.json", "./hooks/codex-capture-hooks.json"],
   interface: {
     displayName: CODEX_DISPLAY_NAME,
     shortDescription: CODEX_SHORT_DESCRIPTION,
@@ -1072,6 +1092,61 @@ assert(
     === JSON.stringify([...CODEX_MCP_KEYS].sort()),
   `Codex brains MCP may only declare ${CODEX_MCP_KEYS.join(", ")} — got ${Object.keys(codexMcp.mcpServers?.brains ?? {}).join(", ")}`,
 );
+
+// Codex capture runs as mcp_tool hooks in a file of their own: Claude Code auto-loads
+// hooks/hooks.json and has no mcp_tool handler, and each Codex hooks file fails to parse on its own.
+const codexCaptureHooksSource = readFileSync(join(PLUGIN, "hooks", "codex-capture-hooks.json"), "utf8");
+const codexCaptureHooks = JSON.parse(codexCaptureHooksSource);
+assert(
+  JSON.stringify(Object.keys(codexCaptureHooks)) === JSON.stringify(["hooks"]),
+  `Codex capture hooks file may only contain hooks — got ${Object.keys(codexCaptureHooks).join(", ")}`,
+);
+assert(
+  JSON.stringify(Object.keys(codexCaptureHooks.hooks ?? {}).sort())
+    === JSON.stringify(Object.keys(CODEX_CAPTURE_INPUTS).sort()),
+  `Codex capture hooks must declare exactly ${Object.keys(CODEX_CAPTURE_INPUTS).join(" and ")} — got ${Object.keys(codexCaptureHooks.hooks ?? {}).join(", ")}`,
+);
+assert(!/"command"\s*:/.test(codexCaptureHooksSource), "Codex capture hooks file must declare no command handler");
+assert(!codexHooksSource.includes("mcp_tool"), "hooks/hooks.json must carry no mcp_tool handler — Claude Code loads it too");
+for (const [event, input] of Object.entries(CODEX_CAPTURE_INPUTS)) {
+  const declarations = (codexCaptureHooksSource.match(new RegExp(`"${event}"\\s*:`, "g")) ?? []).length;
+  assert(
+    declarations === 1,
+    `Codex capture hooks source must declare "${event}" exactly once — JSON.parse keeps the last duplicate (found ${declarations})`,
+  );
+  const groups = codexCaptureHooks.hooks[event];
+  assert(Array.isArray(groups) && groups.length === 1, `Codex capture ${event} must declare exactly one group`);
+  assert(
+    JSON.stringify(Object.keys(groups[0] ?? {})) === JSON.stringify(["hooks"]),
+    `Codex capture ${event} group must declare only hooks — a matcher narrows which turns are captured`,
+  );
+  const handlers = groups[0].hooks;
+  assert(Array.isArray(handlers) && handlers.length === 1, `Codex capture ${event} must declare exactly one handler`);
+  const handler = handlers[0] ?? {};
+  assert(
+    JSON.stringify(Object.keys(handler).sort()) === JSON.stringify(CODEX_CAPTURE_HANDLER_KEYS),
+    `Codex capture ${event} handler may only declare ${CODEX_CAPTURE_HANDLER_KEYS.join(", ")} — got ${Object.keys(handler).join(", ")}`,
+  );
+  assert(handler.type === "mcp_tool", `Codex capture ${event} handler must be mcp_tool — got ${handler.type}`);
+  assert(
+    handler.server === Object.keys(codexMcp.mcpServers)[0],
+    `Codex capture ${event} must call the server .mcp.json declares — got ${handler.server}`,
+  );
+  assert(handler.tool === "ingest_chat_turn", `Codex capture ${event} must call ingest_chat_turn — got ${handler.tool}`);
+  assert(
+    canonicalJson(handler.input) === canonicalJson(input),
+    `Codex capture ${event} input must be exactly ${canonicalJson(input)} — got ${canonicalJson(handler.input)}`,
+  );
+  // Both events wait for the call, so a stalled server must not hold the turn for long.
+  assert(
+    Number.isInteger(handler.timeout) && handler.timeout >= 1 && handler.timeout <= 5,
+    `Codex capture ${event} timeout must be whole seconds from 1 to 5 — got ${handler.timeout}`,
+  );
+  assert(
+    typeof handler.statusMessage === "string" && handler.statusMessage.trim() !== "",
+    `Codex capture ${event} must show a status message while it waits`,
+  );
+}
 
 // Claude Code owns the MCP credential via its own OAuth login, exactly as Codex does. `headers`
 // must stay ABSENT: a declared Authorization header disables the OAuth path outright — the CLI
@@ -3101,37 +3176,36 @@ try {
     "SessionStart hook must inject core.md — it is the only delivery path for the core prompt, and the pins above prove the text is right, not that it reaches a model",
   );
 
+  // Codex captures through the mcp_tool hooks in codex-capture-hooks.json, so on Codex this script
+  // runs the inbox and nothing else: no ingest request on either event, even with a credential
+  // that resolves.
+  const codexUrls = join(temp, "codex-turn-urls.txt");
+  const codexTurnEnv = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH ?? ""}`,
+    PLUGIN_ROOT: PLUGIN,
+    BRAINS_API_TOKEN: "",
+    BRAINS_INBOX_TOKEN: "",
+    CLAUDE_PLUGIN_OPTION_TOKEN: "",
+    // Hermetic without disabling discovery: pointing the store reads at paths that do not exist
+    // keeps a real developer credential out while the header scavenge still runs.
+    BRAINS_CLAUDE_CREDENTIALS_FILE: join(temp, "no-such-store.json"),
+    CODEX_HOME: join(temp, "no-such-codex-home"),
+    BRAINS_STATE_DIR: join(temp, "state"),
+    CAPTURE_FILE: capture,
+    URL_FILE: codexUrls,
+  };
   const result = spawnSync("bash", [join(PLUGIN, "hooks", "brains-turn.sh")], {
     input: JSON.stringify({ session_id: "codex-session", prompt: "hello" }),
-    env: {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
-      PLUGIN_ROOT: PLUGIN,
-      BRAINS_API_TOKEN: "",
-      BRAINS_INBOX_TOKEN: "",
-      CLAUDE_PLUGIN_OPTION_TOKEN: "",
-      // Hermetic without disabling discovery: these two scenarios EXERCISE the header
-      // scavenge, so the blanket switch would make them vacuous. Pointing the store reads at
-      // paths that do not exist keeps a real developer credential out of them just as firmly.
-      BRAINS_CLAUDE_CREDENTIALS_FILE: join(temp, "no-such-store.json"),
-      CODEX_HOME: join(temp, "no-such-codex-home"),
-      BRAINS_STATE_DIR: join(temp, "state"),
-      CAPTURE_FILE: capture,
-    },
+    env: codexTurnEnv,
   });
   assert(result.status === 0, `standalone Codex turn hook failed: ${result.stderr.toString()}`);
-  assert(await waitForFile(capture), "asynchronous Codex user ingest POST did not complete");
-  const payloads = readFileSync(capture, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-  assert(payloads.length === 1, "standalone Codex turn hook must POST exactly one ingest payload");
-  assert(payloads[0].client === "codex", "standalone Codex payload must identify Codex");
-  assert(payloads[0].client_type === "cli", "standalone Codex payload must identify the CLI surface");
-  assert(payloads[0].content === "hello", "standalone Codex payload must preserve the prompt");
+  const codexPromptLines = result.stdout.toString().split("\n").filter((l) => l.trim() !== "");
+  assert(
+    codexPromptLines.length === 1 && /^<!-- brains:now -->/.test(codexPromptLines[0]),
+    `Codex prompt turn must emit only the time line — got: ${JSON.stringify(codexPromptLines)}`,
+  );
 
-  // Codex Stop must not return before its assistant POST has completed. The
-  // delayed fake curl makes the old fire-and-forget implementation return
-  // before the capture file exists; synchronous delivery leaves the assistant
-  // payload present as soon as the hook exits.
-  const assistantCapture = join(temp, "assistant-payloads.jsonl");
   const stopResult = spawnSync("bash", [join(PLUGIN, "hooks", "brains-turn.sh")], {
     input: JSON.stringify({
       session_id: "codex-session",
@@ -3139,38 +3213,29 @@ try {
       last_assistant_message: "hello from codex",
       stop_hook_active: false,
     }),
-    env: {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
-      PLUGIN_ROOT: PLUGIN,
-      BRAINS_API_TOKEN: "",
-      BRAINS_INBOX_TOKEN: "",
-      CLAUDE_PLUGIN_OPTION_TOKEN: "",
-      // Hermetic without disabling discovery: these two scenarios EXERCISE the header
-      // scavenge, so the blanket switch would make them vacuous. Pointing the store reads at
-      // paths that do not exist keeps a real developer credential out of them just as firmly.
-      BRAINS_CLAUDE_CREDENTIALS_FILE: join(temp, "no-such-store.json"),
-      CODEX_HOME: join(temp, "no-such-codex-home"),
-      BRAINS_STATE_DIR: join(temp, "state"),
-      CAPTURE_FILE: assistantCapture,
-      SLOW_CAPTURE: "1",
-    },
+    env: codexTurnEnv,
   });
   assert(stopResult.status === 0, `standalone Codex Stop hook failed: ${stopResult.stderr.toString()}`);
-  const assistantPayloads = readFileSync(assistantCapture, "utf8")
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line));
-  assert(assistantPayloads.length === 1, "Codex Stop must complete exactly one assistant ingest POST");
-  assert(assistantPayloads[0].role === "assistant", "Codex Stop payload must use the assistant role");
-  assert(assistantPayloads[0].client === "codex", "Codex Stop payload must identify Codex");
-  assert(assistantPayloads[0].content === "hello from codex", "Codex Stop payload must preserve the response");
+  assert(stopResult.stdout.toString() === "", `Codex Stop must print nothing — got: ${stopResult.stdout.toString()}`);
+  // Bounded wait: an ingest that came back would be backgrounded and land after the hook exits.
+  assert(!(await waitForFile(capture, 300)), "Codex turn hook must send no capture — Codex captures through its mcp_tool hooks");
+  const codexTargets = existsSync(codexUrls) ? readFileSync(codexUrls, "utf8").trim().split("\n") : [];
+  assert(
+    !codexTargets.some((url) => url.includes("/ingest/claude")),
+    `Codex turn hook must not call the ingest endpoint — got: ${JSON.stringify(codexTargets)}`,
+  );
+  for (const mode of ["prompt", "stop"]) {
+    assert(
+      codexTargets.some((url) => url.includes(`mode=${mode}`)),
+      `Codex turn hook must still run the inbox in ${mode} mode — got: ${JSON.stringify(codexTargets)}`,
+    );
+  }
 
-  // Conversation capture and the inbox are OPT-IN: the MCP server authenticates itself, so a user
-  // who never sets a token still gets a working plugin. Both hooks must therefore no-op silently
-  // when no credential resolves — exit 0, no output, no request — rather than erroring or hanging.
-  // `codexless` shadows `codex` with a failing stub so the turn hook's config scavenge finds
-  // nothing, which is the state of a plugin install that has only ever done `codex mcp login`.
+  // The inbox is OPT-IN on Codex: the MCP server authenticates itself, and capture rides that
+  // connection, so a user who never sets a token still gets a working plugin. The hooks must
+  // therefore not fail when no inbox credential resolves — exit 0, nothing on stderr, no request.
+  // `codexless` shadows `codex` with a failing stub so the config scavenge finds nothing, which is
+  // the state of a plugin install that has only ever done `codex mcp login`.
   const codexless = join(temp, "codexless");
   mkdirSync(codexless);
   writeFileSync(join(codexless, "codex"), "#!/bin/sh\nexit 1\n");
@@ -3188,25 +3253,25 @@ try {
     BRAINS_STATE_DIR: join(temp, "state-no-token"),
     CAPTURE_FILE: noTokenCapture,
   };
+  // Its own state dir, so the turn run asserts its own first claim of the note.
   const turnNoToken = spawnSync("bash", [join(PLUGIN, "hooks", "brains-turn.sh")], {
     input: JSON.stringify({ session_id: "codex-session", prompt: "hello" }),
-    env: noTokenEnv,
+    env: { ...noTokenEnv, BRAINS_STATE_DIR: join(temp, "state-no-token-turn") },
   });
   assert(turnNoToken.status === 0, "turn hook must exit 0 with no token available");
-  // "No capture" is no longer the same as "no output". The `now:` line is not capture — it tells
-  // the model what time it is — and it used to sit BEHIND the credential gate, so a user without a
-  // token silently lost accurate time injection as collateral damage. It now runs ahead of the
-  // gate, and the thing this asserts is what actually matters: nothing is sent and nothing errors.
+  // The `now:` line is not capture — it tells the model what time it is — and it runs ahead of
+  // every credential check, so a user without a token keeps accurate time injection.
   assert(
     turnNoToken.stderr.toString() === "",
     "turn hook must not write to stderr with no credential available",
   );
-  for (const line of turnNoToken.stdout.toString().split("\n").filter((l) => l.trim() !== "")) {
-    assert(
-      /^<!-- brains:now -->/.test(line),
-      `turn hook must emit nothing but the time line with no credential available, got: ${line}`,
-    );
-  }
+  const turnNoTokenLines = turnNoToken.stdout.toString().split("\n").filter((l) => l.trim() !== "");
+  assert(
+    turnNoTokenLines.length === 2 &&
+      turnNoTokenLines.filter((l) => /^<!-- brains:now -->/.test(l)).length === 1 &&
+      turnNoTokenLines.filter((l) => /^<!-- brains:inbox -->The brains inbox is OFF: /.test(l)).length === 1,
+    `Codex turn hook with no credential must emit the time line and one inbox note — got: ${JSON.stringify(turnNoTokenLines)}`,
+  );
   assert(!existsSync(noTokenCapture), "turn hook must not POST anything with no token available");
 
   const inboxNoToken = spawnSync(
@@ -3224,19 +3289,19 @@ try {
   // eleven days on the machine that reported it.
   const firstSignal = inboxNoToken.stdout.toString();
   assert(
-    firstSignal.includes("<!-- brains:capture -->"),
-    "inbox engine must announce the off-state once at session start",
+    (firstSignal.match(/<!-- brains:inbox -->/g) ?? []).length === 1,
+    "inbox engine must announce the inbox off-state once at session start",
   );
-  // One text on every host: the Codex note explains where the sign-in is read
-  // from and names no step, because signing in does not turn capture on.
+  // The Codex note explains where the inbox reads the sign-in from and names
+  // no step, because signing in does not turn the inbox on.
   assert(
-    firstSignal.includes("brains reads the Codex sign-in for brains only from Codex's credentials file") &&
+    firstSignal.includes("brains reads the Codex sign-in for the inbox only from Codex's credentials file") &&
       firstSignal.includes("brains does not read the keychain from a hook"),
-    "the Codex off-state must say where the sign-in is read from and why the keychain is not",
+    "the Codex off-state must say where the inbox reads the sign-in from and why the keychain is not",
   );
   assert(
     !/mcp login/.test(firstSignal),
-    "…and must name no sign-in step, because signing in does not turn capture on",
+    "…and must name no sign-in step, because signing in does not turn the inbox on",
   );
   // No action, so no offer protocol: a note that says there is nothing to do
   // and then tells the agent to offer it leaves the agent to invent one.
@@ -3244,13 +3309,23 @@ try {
     !/Offer this to the user/.test(firstSignal) && /nothing for you to offer/.test(firstSignal),
     "…and a note with no action must not carry the offer tail",
   );
+  // Codex capture runs over the MCP sign-in, so nothing here may read to the
+  // model as capture being off: core.md binds the capture tag to exactly that.
+  for (const [label, output] of [
+    ["turn hook", turnNoToken.stdout.toString()],
+    ["inbox engine", firstSignal],
+  ] as const) {
+    assert(!output.includes("brains:capture"), `Codex ${label} must not emit a brains:capture note`);
+    const offClaim = /captur\w*[^<]{0,40}\bOFF\b/i.exec(output);
+    assert(offClaim === null, `Codex ${label} must not say capture is off — matched: ${JSON.stringify(offClaim?.[0])}`);
+  }
   const secondSignal = spawnSync(
     "bash",
     [join(PLUGIN, "hooks", "lib", "brains-inbox.sh"), "startup", "codex-session-2"],
     { env: noTokenEnv },
   );
   assert(
-    !secondSignal.stdout.toString().includes("<!-- brains:capture -->"),
+    !secondSignal.stdout.toString().includes("<!-- brains:inbox -->"),
     "the off-state signal must be claimed once per episode, not repeated every session",
   );
   assert(

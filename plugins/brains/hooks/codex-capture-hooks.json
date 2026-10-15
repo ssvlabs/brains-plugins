@@ -1,0 +1,42 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "brains",
+            "tool": "ingest_chat_turn",
+            "input": {
+              "session_id": "${session_id}",
+              "role": "user",
+              "content": "${prompt}",
+              "client": "codex"
+            },
+            "timeout": 5,
+            "statusMessage": "Saving turn to brains"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "brains",
+            "tool": "ingest_chat_turn",
+            "input": {
+              "session_id": "${session_id}",
+              "role": "assistant",
+              "content": "${last_assistant_message}",
+              "client": "codex"
+            },
+            "timeout": 5,
+            "statusMessage": "Saving turn to brains"
+          }
+        ]
+      }
+    ]
+  }
+}
