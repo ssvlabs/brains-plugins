@@ -15,14 +15,12 @@
 #                                                 mode (notifications only, no
 #                                                 stdout). Fires AFTER the turn.
 #
-# Ingest is the capture path WHERE IT RUNS. It needs a credential, which now
-# comes from lib/brains-credential.sh: an explicitly configured token if there
-# is one, otherwise the client's own MCP OAuth store. Where the hooks do not run
-# at all (claude.ai web) save_chat_session is the only path.
-#
-# Claude keeps the existing fire-and-forget delivery. Codex waits for its
-# assistant POST during Stop so the hook process cannot finish before the
-# response has been handed to the ingest endpoint.
+# Ingest is the Claude Code capture path. It needs a credential, which comes
+# from lib/brains-credential.sh: an explicitly configured token if there is one,
+# otherwise the client's own MCP OAuth store. Codex captures through the
+# mcp_tool hooks in codex-capture-hooks.json, over its own MCP sign-in, so there
+# this script runs only the inbox engine. Where the hooks do not run at all
+# (claude.ai web) save_chat_session is the only path.
 set -u
 
 # The same hook implementation serves both clients. Codex defines PLUGIN_ROOT;
@@ -62,6 +60,18 @@ if [ -n "$PROMPT" ]; then
     mkdir -p "$(dirname "$_now_file")" 2>/dev/null && printf '%s' "$_now_key" > "$_now_file" 2>/dev/null
     printf '<!-- brains:now -->now: %s<!-- /brains:now -->\n' "$(date '+%a %Y-%m-%d %H:%M %Z (%z)')"
   fi
+fi
+
+# ---- Codex: inbox only ------------------------------------------------------
+if [ "$CLIENT" = "codex" ]; then
+  if [ -n "$PROMPT" ]; then
+    [ -x "$LIB" ] && "$LIB" prompt "$SESSION"
+  elif [ -n "$LAST_ASSISTANT" ] || [ -n "$TRANSCRIPT" ]; then
+    ACTIVE=$(printf '%s' "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)
+    [ "$ACTIVE" = "true" ] && exit 0
+    [ -x "$LIB" ] && "$LIB" stop "$SESSION"
+  fi
+  exit 0
 fi
 
 # ---- capture credential -----------------------------------------------------
@@ -105,11 +115,8 @@ capture_log() {  # role, outcome
 ingest_once() {  # role, content
   local role payload outcome
   role="$1"; payload="$2"
-  # An explicit ceiling on top of the resolver's default, because this is the
-  # one call Codex makes SYNCHRONOUSLY: the Stop hook waits for the assistant
-  # POST, so a server that accepts the connection and then never answers would
-  # hold up the turn. On Claude the request is backgrounded and an unbounded one
-  # would linger instead of exiting.
+  # An explicit ceiling on top of the resolver's default: the request is
+  # backgrounded, and an unbounded one would linger instead of exiting.
   if brains_request ingest "$BRAINS_URL_INGEST" --max-time 5 \
        -X POST -H "Content-Type: application/json" -d "$payload"; then
     outcome="ok"
@@ -131,20 +138,14 @@ ingest() {  # role, content
   [ -z "$content" ] && return 0
   payload=$(jq -nc --arg s "$SESSION" --arg r "$role" --arg c "$content" --arg client "$CLIENT" \
     '{session_id:$s, role:$r, content:$c, client:$client, client_type:"cli"}')
-  if [ "$CLIENT" = "codex" ] && [ "$role" = "assistant" ]; then
-    # Synchronous: Codex Stop must not finish before the response is delivered.
+  # Fire-and-forget, so this request outlives the hook. It takes its own lease
+  # on the credential first — the hook's exit would otherwise remove the config
+  # while curl was still starting up, and the POST would go out unauthenticated.
+  _lease=$(brains_cred_lease) || return 0
+  ( BRAINS_CRED_CONFIG="$_lease"
+    trap 'brains_cred_return "$_lease"' EXIT
     ingest_once "$role" "$payload"
-  else
-    # Fire-and-forget, so this request outlives the hook. It takes its own lease
-    # on the credential first — the hook's exit would otherwise remove the
-    # config while curl was still starting up, and the POST would go out
-    # unauthenticated.
-    _lease=$(brains_cred_lease) || return 0
-    ( BRAINS_CRED_CONFIG="$_lease"
-      trap 'brains_cred_return "$_lease"' EXIT
-      ingest_once "$role" "$payload"
-      brains_cred_return "$_lease" ) &
-  fi
+    brains_cred_return "$_lease" ) &
 }
 
 if [ -n "$PROMPT" ]; then
@@ -157,11 +158,8 @@ elif [ -n "$LAST_ASSISTANT" ] || [ -n "$TRANSCRIPT" ]; then
   # ---- Stop: ingest the last assistant text block, drain notifications ------
   ACTIVE=$(printf '%s' "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)
   [ "$ACTIVE" = "true" ] && exit 0
-  # Claude keeps its original path: parse the transcript. Codex has no stable
-  # transcript format, so outside the Claude runtime (or if the parse yields
-  # nothing) use the last_assistant_message field from the payload instead.
   CONTENT=""
-  if [ -z "${PLUGIN_ROOT:-}" ] && [ -f "$TRANSCRIPT" ]; then
+  if [ -f "$TRANSCRIPT" ]; then
     CONTENT=$(jq -rs '[.[] | select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text] | last // ""' \
       "$TRANSCRIPT" 2>/dev/null)
   fi
