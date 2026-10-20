@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Conventions for coding agents and contributors in this repo. `CLAUDE.md` is a symlink to this file; edit `AGENTS.md` only.
+Conventions for coding agents and contributors in this repo. `CLAUDE.md` imports this file; edit `AGENTS.md` only. Keep the repo free of symlinks: the brains desktop app installs the plugin from GitHub's archive of this repo and refuses an archive that holds a link.
 
 This repo publishes the brains plugin for Codex and Claude Code. README.md covers what it does and how users install it.
 

@@ -823,6 +823,12 @@ const automationSkillNormalized = automationSkill.replace(/\s+/g, " ");
 assert(claudeManifest.name === "brains", "Claude manifest name must be brains");
 assert(codexManifest.name === "brains", "Codex manifest name must be brains");
 assert(claudeManifest.version === codexManifest.version, "client manifests must stay version-aligned");
+
+// The desktop app installs from GitHub's archive of this repo and refuses one that holds a link.
+const trackedFiles = spawnSync("git", ["ls-files", "--stage"], { cwd: ROOT, encoding: "utf8" });
+assert(trackedFiles.status === 0, `git ls-files failed: ${trackedFiles.stderr}`);
+const symlinks = trackedFiles.stdout.split("\n").filter((line) => line.startsWith("120000 "));
+assert(symlinks.length === 0, `the repo must hold no symlinks: ${symlinks.map((line) => line.split("\t")[1]).join(", ")}`);
 assert(claudeManifest.hooks === "./hooks/claude-hooks.json", "Claude must select its event map explicitly");
 assert(codexManifest.skills === "./skills/", "Codex must use the shared skills directory");
 assert(codexManifest.mcpServers === "./.mcp.json", "Codex must load its MCP declaration");
