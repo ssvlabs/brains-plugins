@@ -27,7 +27,7 @@
       "capability_id": "procedure:automation",
       "catalog_sha256": "25a7694ffe3089a60aa7d9561bd09d83d47b169846cea9f4953103895de50427",
       "artifact_path": "plugins/brains/skills/brains-automation/SKILL.md",
-      "artifact_sha256": "277cd03b7c76b1e7321ea562825a40d7228966f87dbf7537b6822af888dded64"
+      "artifact_sha256": "da984f6e89f0f362aec66309c8708aeb88311ea65c48a2565124cb9d5eafbcf1"
     },
     {
       "capability_id": "procedure:workflow",
@@ -36,5 +36,5 @@
       "artifact_sha256": "3e95e12643ff463594f7ac1ffc8ad7a0120011e20d789bf5921db16d6059b153"
     }
   ],
-  "source_commit": "7d10a9be48b8b8d7a797da640f9cb235a55c76d0"
+  "source_commit": "a580e0786780b43241d52ca4c10b932793605585"
 }

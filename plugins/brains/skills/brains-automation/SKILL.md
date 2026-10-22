@@ -71,7 +71,7 @@ This is the **complete** surface a sandboxed automation can call. Do NOT guess a
 **Other sandbox capabilities:**
 - **Per-automation K/V** (cursors, watermarks, last-seen ids): `brains.kv.get(k)` / `set(k,v)` / `list()` / `delete(k)`. **No grant needed** — it's auto-scoped to this automation.
 - **Secrets vault:** reference `{{secret_name}}` inside `http` `url`/`headers`/`query` values — the MCP server substitutes the decrypted value before egress. `brains.call("agent_secret_list")` reads the key names (never values). Grant `agent_secret_list` to enumerate keys; the substitution itself rides on the `http_fetch` grant. Keys are set out-of-band, and the sandbox cannot write secrets, only reference them. During authoring you work with secret NAMES only — **never solicit the value in chat**; run Step 5.7 for the name-confirm / existence-check / missing-value handling.
-- **LLM from the sandbox:** `brains.llm({...})` (grant `agent_complete`). **If you feed it bytes fetched from outside brains** (`brains.http`, a third-party API), wrap them first with `brains.wrapUntrusted(text)` / `brains.untrustedClause()` — the prompt-injection guard. Any flow that grants both `http_fetch` and `agent_complete` must do this.
+- **LLM from the sandbox:** `brains.llm({...})` (grant `agent_complete`). **If you feed it bytes from outside brains** (`brains.http`, third-party APIs), wrap them first with `brains.wrapUntrusted(text)` / `brains.untrustedClause()` — the prompt-injection guard. Mandatory if `http_fetch` and `agent_complete` are both granted. Vision: `images: [{url}|{slack_file:{install_id,file_id}}]` (+`act_on_integration`).
 - **Owner identity / timezone:** `brains.whoami()` (grant `whoami`) — the supported way to get the owner's tz, which you need whenever a cron is expressed in local time. `brains.user` / `brains.profile` are injected directly (no grant, no call).
 - **Self-diagnosis:** `brains.agent_recent_failures({limit?})` (grant `agent_recent_failures`) — this automation's recent failed runs.
 - **Outbound HTTP:** `brains.http({url, method?, headers?, query?, timeout_ms?})` (grant `http_fetch` — see Step 5.5; egress is host-pinned). **Request body — name the field explicitly, never leave it implied:** `body_json` (any JSON value; sends it as JSON and sets Content-Type for you), `body_text` (a string, sent verbatim — set your own Content-Type), or `body` (fetch-style alias: a string goes verbatim, anything else is serialized as JSON). Precedence is `body_json`, then `body_text`, then `body`. **Binary must be base64-encoded into a string first** — a `Uint8Array`/`Blob`/`FormData`/`URLSearchParams` cannot cross to the server and is rejected. `GET`/`DELETE` never send a body. Note `{{secret}}` substitution does **not** apply to the body (url/headers/query only), so a body cannot reference the vault. Max request body 200 KB.
@@ -351,26 +351,26 @@ Call **`save_agent_draft`** (same MCP namespace) with:
 - `writes_to_boards` (uuid[]) — same value you passed to find_overlapping_agents
 - `dedupe_target_field` (e.g. `"updates"`) — only if the source appends to a shared array
 - `dedupe_key_field` (e.g. `"postId"`) — pair with the above; required for future Step 4.5 checks to be useful
-- `acknowledged_http_fetch_hosts` (string[]) — REQUIRED if `tool_grants` includes `http_fetch`. The exact list of bare hostnames the user approved at Step 5.5 (e.g. `["api.binance.com", "api.etherscan.io"]`). The runtime `http_fetch` handler enforces this list per request. Pass empty / omit if `http_fetch` is not granted (server rejects misleading combinations).
+- `acknowledged_http_fetch_hosts` (string[]) — REQUIRED if `tool_grants` includes `http_fetch`. The exact list of bare hostnames the user approved at Step 5.5 (e.g. `["api.binance.com"]`). `http_fetch` enforces this list per request. Omit if `http_fetch` is not granted (the server rejects misleading combinations).
 
-**Hard gate behaviour at save (http_fetch):** if `tool_grants` includes `http_fetch` AND `acknowledged_http_fetch_hosts` is missing or empty, the server REFUSES the save with `save refused: tool_grants includes http_fetch but acknowledged_http_fetch_hosts is missing or empty`. Recover by re-running Step 5.5 with the user, capturing the host list, and retrying the save with the array populated. Don't try to bypass — there is no other path.
+**Hard gate behaviour at save (http_fetch):** if `tool_grants` includes `http_fetch` AND `acknowledged_http_fetch_hosts` is missing or empty, the server REFUSES the save with `save refused: tool_grants includes http_fetch but acknowledged_http_fetch_hosts is missing or empty`. Recover by re-running Step 5.5 with the user and retrying with the host list; don't try to bypass — there is no other path.
 
 **Hard gate behaviour at save (overlap):** if Step 4.5 returned `strict_count > 0` AND the user picked option (b) "carry on" / coexist (NOT skip), the server will REFUSE the save unless you also pass:
 
 - `acknowledged_overlap: true`
-- `coexistence_note` (≥10 chars) — a one-sentence explanation of *why* this new agent should run alongside the existing one(s). Use the user's own words from the mitigation discussion. The server prepends this note to the saved source as a header comment for audit.
+- `coexistence_note` (≥10 chars) — a one-sentence explanation of *why* this new agent should run alongside the existing one(s). Use the user's own words from the mitigation discussion; the server keeps it on the saved source for audit.
 
-If the server rejects the save (look for an error message starting with `save refused:`), do NOT retry naively. Re-read the rejection — it tells you which agent the gate matched. Either:
+If the save is refused (`save refused: …`), do NOT retry naively — the rejection names the agent the gate matched. Either:
 - Ask the user for the missing coexistence note (paraphrase the mitigation reasoning they already gave you in Step 4.5) and retry with `acknowledged_overlap: true` plus the note, OR
 - If the user actually meant skip, stop and link them to the existing agent.
 
 Never set `acknowledged_overlap: true` without a real coexistence_note.
 
-If Step 4.5 returned 0 overlaps, do NOT pass `acknowledged_overlap` or `coexistence_note` — the server rejects the call as misleading.
+With 0 overlaps at Step 4.5, pass neither `acknowledged_overlap` nor `coexistence_note` — the server rejects that as misleading.
 
-The new agent lands in `active` state and starts firing on its triggers immediately.
+The agent lands `active`, firing on its triggers at once. **If the save returns `kind: "draft"`**, the agent does not exist yet: tell the user it is waiting for their approval and stop; the missing-secret pause and Step 8.5 come after approval.
 
-**Missing-secret pause (mandatory when Step 5.7 left a referenced secret unstored):** right after the save returns, call `update_agent` with `{automation_id, state: "paused"}` — a state-only patch; do NOT pass `tool_grants` or `acknowledged_http_fetch_hosts` with it. An active agent whose secret is missing fails every scheduled run until the value is stored; paused, it fires nothing. The Step 8.5 smoke test still works (manual runs execute on paused agents), and Step 9's narration must tell the user it is paused and how to activate. Skip this pause when every referenced secret already exists.
+**Missing-secret pause (mandatory when Step 5.7 left a referenced secret unstored):** right after the save returns, call `update_agent` with `{automation_id, state: "paused"}` — a state-only patch; do NOT pass `tool_grants` or `acknowledged_http_fetch_hosts` with it. Active with a missing secret, it fails every scheduled run; paused, it fires nothing. The Step 8.5 smoke test still works (manual runs execute on paused agents), and Step 9's narration must tell the user it is paused and how to activate. Skip this pause when every referenced secret already exists.
 
 ## Step 8.5 — Smoke test (mandatory)
 
