@@ -9,7 +9,7 @@
       "capability_id": "integration-actions",
       "catalog_sha256": "6f0d1845064970b89e9e623e838314f57fe4c77393637224720f36fe48dbf2be",
       "artifact_path": "plugins/brains/skills/brains-write/SKILL.md",
-      "artifact_sha256": "075fc725ec676a4af71f70e8d72c6c25baed706a9f83bc4d53e32b8bff1b9a38"
+      "artifact_sha256": "6cd05a7cc7a251cf160462d7601e013f1eaaf0941b75a908dcc98a9bfae21498"
     },
     {
       "capability_id": "brains-features",
@@ -36,5 +36,5 @@
       "artifact_sha256": "3e95e12643ff463594f7ac1ffc8ad7a0120011e20d789bf5921db16d6059b153"
     }
   ],
-  "source_commit": "a580e0786780b43241d52ca4c10b932793605585"
+  "source_commit": "89465c05823d43a3559ad12d2192f5b60808ebef"
 }

@@ -20,9 +20,8 @@ shape. Partial tuples error; only bare legacy `source` returns `clarification`.
 `requires_confirmation:true` normally drafts for out-of-band approval;
 `requires_confirmation:false` runs inline. A user may additionally enable direct
 execution in their brains settings, in which case a short allowlist of actions —
-creates that stay within the audience their destination already has, and
-explicit sends whose recipients the server bounds to addresses or channels the
-person has already sent to — also runs inline when
+creates that stay within the audience their destination already has — also
+runs inline when
 called from an eligible client signed in from the user's own computer (CLI clients such as Claude Code and Codex) — every execution
 is still recorded in /inbox. The mode is decided server-side per call, so treat
 any call as potentially executing and never assume a `draft_id`. Get the user's
