@@ -1,0 +1,119 @@
+name: Assign reviewers
+
+# Requests review from `count` developers picked at random from the pool in
+# .github/reviewers.yml when a PR into main is opened, or retargeted onto main
+# (a stacked PR whose parent merged). No gate, no re-roll: the review request
+# is the whole system.
+#
+# GitHub runs pull_request_target workflows from the default branch, which is
+# main here, and the pool is read from main too, so a change to either file
+# takes effect once merged into main.
+
+on:
+  # pull_request_target so fork and Dependabot PRs get a write token. This job
+  # must never check out or run PR code: it only reads the pool from the base.
+  pull_request_target:
+    types: [opened, edited]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  assign:
+    # `edited` fires on every title/body edit; only a base change is a retarget.
+    if: github.event.action == 'opened' || github.event.changes.base != null
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Request reviewers from the pool
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { randomInt } = require('node:crypto');
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+
+            // Never fail the PR: every error ends as a warning and exit 0.
+            try {
+              // Read the pool from the BASE branch so a PR cannot edit its own pool.
+              const { data } = await github.rest.repos.getContent({
+                owner, repo, path: '.github/reviewers.yml', ref: pr.base.ref,
+              });
+              const text = Buffer.from(data.content, 'base64').toString('utf8');
+
+              const countMatch = text.match(/^count:\s*(\d+)\s*(?:#.*)?$/m);
+              const count = countMatch ? Number(countMatch[1]) : 2;
+              const afterPool = text.split(/^pool:\s*(?:#.*)?$/m)[1];
+              if (afterPool === undefined) {
+                core.warning('reviewers.yml: no `pool:` block list found');
+              }
+              const poolBlock = (afterPool ?? '').split(/^(?=[^\s#-])/m)[0];
+              const ITEM = /^\s*-\s*(["']?)([A-Za-z0-9-]+)\1\s*(?:#.*)?$/;
+              const lines = poolBlock.split(/\r?\n/).filter((l) => l.trim() && !l.trim().startsWith('#'));
+              const ignored = lines.filter((l) => !ITEM.test(l));
+              if (ignored.length) {
+                core.warning(`reviewers.yml: ignored pool lines ${JSON.stringify(ignored)}`);
+              }
+              const pool = lines.filter((l) => ITEM.test(l)).map((l) => l.match(ITEM)[2]);
+
+              // The opened payload predates CODEOWNERS requests, so give them
+              // time to land and read the live list rather than the payload.
+              if (context.payload.action === 'opened') {
+                await new Promise((resolve) => setTimeout(resolve, 20_000));
+              }
+              const { data: requested } = await github.rest.pulls.listRequestedReviewers({
+                owner, repo, pull_number: pr.number,
+              });
+
+              // A pending request disappears once its reviewer submits, so count
+              // submitted reviews too. A retarget only tops up to `count`: a
+              // stacked PR is often already reviewed against its parent.
+              const { data: reviews } = await github.rest.pulls.listReviews({
+                owner, repo, pull_number: pr.number, per_page: 100,
+              });
+              const author = pr.user.login.toLowerCase();
+              const engaged = new Set([
+                ...requested.users.map((u) => u.login),
+                ...reviews.filter((r) => r.user && r.user.type !== 'Bot').map((r) => r.user.login),
+              ].map((l) => l.toLowerCase()).filter((l) => l !== author));
+              const need = context.payload.action === 'edited'
+                ? Math.max(0, count - engaged.size)
+                : count;
+              if (need === 0) {
+                core.notice('PR already has enough reviewers; nothing requested.');
+                return;
+              }
+
+              const taken = new Set([author, ...engaged]);
+              const candidates = pool.filter((l) => !taken.has(l.toLowerCase()));
+
+              for (let i = candidates.length - 1; i > 0; i--) {
+                const j = randomInt(i + 1);
+                [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+              }
+
+              // One request per candidate: a single login that is no longer a
+              // collaborator 422s a batched call and would leave zero reviewers.
+              const picked = [];
+              for (const login of candidates) {
+                if (picked.length >= need) break;
+                try {
+                  await github.rest.pulls.requestReviewers({
+                    owner, repo, pull_number: pr.number, reviewers: [login],
+                  });
+                  picked.push(login);
+                } catch (e) {
+                  core.warning(`Could not request @${login} (check .github/reviewers.yml): ${e.message}`);
+                }
+              }
+
+              if (picked.length === 0) {
+                core.warning('No eligible reviewers in the pool; nothing requested.');
+                return;
+              }
+              core.notice(`Requested review from ${picked.map((p) => '@' + p).join(', ')}`);
+            } catch (e) {
+              core.warning(`Reviewer assignment skipped: ${e.message}`);
+            }

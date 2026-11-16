@@ -19,6 +19,7 @@ This repo publishes the brains plugin for Codex and Claude Code. README.md cover
 
 - Branch off `main` and open the PR against `main`; it cannot be pushed to directly.
 - `main` requires 1 approving review, signed commits and resolved review threads. A new push dismisses earlier approvals, and the last push needs approval from someone other than its pusher.
+- Reviewers are auto-requested: when a PR into `main` is opened or retargeted onto it, `.github/workflows/assign-reviewers.yml` requests two from `.github/reviewers.yml`, never the author; a retarget only tops up to two. Don't pass `--reviewer` to `gh pr create`; add a reviewer by hand only when a requested one is away or a specific person must look. A pool change is a PR to `.github/reviewers.yml` and takes effect once merged.
 - Use conventional commit titles with a scope: `fix(brains): ...`, `feat(brains): ...`, `docs(tests): ...`. Recent plugin changes use scope `brains`. Nothing checks titles.
 
 ## Tests

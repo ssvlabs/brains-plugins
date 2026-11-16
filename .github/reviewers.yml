@@ -1,0 +1,12 @@
+# Reviewer pool for .github/workflows/assign-reviewers.yml: each PR opened into
+# (or retargeted onto) main gets `count` reviewers picked at random from `pool`,
+# never its author.
+# The workflow reads this file from main, so a change takes effect once merged.
+count: 2
+pool:
+  - kchojn
+  - stefan-ssv-labs
+  - ayaz-ssvlabs
+  - olegshmuelov
+  - nir-ssvlabs
+  - sebastian-ssvlabs
